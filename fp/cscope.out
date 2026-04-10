@@ -1,4 +1,4 @@
-cscope 15 $HOME/M1/MoSIG/S2 Courses/Crypto/TP/fp               0000170776
+cscope 15 $HOME/M1/MoSIG/S2 Courses/Crypto/TP/MoSIG_Crypto_TP/fp               0000175533
 	@attack.h
 
 1 
@@ -115,6 +115,382 @@ size_t
 m2
 );
 
+	@hash.c
+
+1 
+	~<¡ršg.h
+>
+
+2 
+	~<¡dlib.h
+>
+
+3 
+	~"hash.h
+"
+
+4 
+	~"utžs.h
+"
+
+16 
+	$com´essiÚ
+(
+by‹
+ 
+h
+[
+HLEN
+], cÚ¡ by‹ 
+m
+[
+BLEN
+]){
+
+18 
+by‹
+ 
+hash
+[
+HLEN
+];
+
+19 
+	`memýy
+(
+hash
+,
+h
+,
+HLEN
+);
+
+22 
+	`¥eck_’c
+(
+m
+,
+h
+,h);
+
+23 
+i
+ = 0; i < 
+HLEN
+; i++){
+
+24 
+h
+[
+i
+] = h[i] ^ 
+hash
+[i];
+
+26 
+	}
+}
+
+28 
+	$hash
+(cÚ¡ 
+by‹
+ *
+m
+, 
+size_t
+ 
+Ën
+, by‹ 
+h
+[
+HLEN
+]){
+
+31 
+i
+ = 0; i < 
+HLEN
+; i++){
+
+32 
+h
+[
+i
+] = (
+IV
+ >> (i*8)) & 0xFF;
+
+36 
+size_t
+ 
+nb_blocks
+ = (
+Ën
+ + 
+BLEN
+ - 1) / BLEN;
+
+39 
+by‹
+ *
+mes§ge
+ = 
+	`ÿÎoc
+(
+nb_blocks
+ * 
+BLEN
+, 1);
+
+41 
+	`memýy
+(
+mes§ge
+,
+m
+,
+Ën
+);
+
+51 
+i
+ = 0; i < 
+nb_blocks
+; i++){
+
+52 
+	`com´essiÚ
+(
+h
+,
+mes§ge
+ + 
+i
+ * 
+BLEN
+);
+
+58 
+by‹
+ *
+Ï¡_block
+ = 
+	`ÿÎoc
+(
+BLEN
+,1);
+
+60 
+b™_Ëngth
+ = ()
+Ën
+ * 8;
+
+61 
+	`memýy
+(
+Ï¡_block
+,&
+b™_Ëngth
+,());
+
+64 
+	`com´essiÚ
+(
+h
+,
+Ï¡_block
+);
+
+68 
+	`ä“
+(
+mes§ge
+);
+
+69 
+	`ä“
+(
+Ï¡_block
+);
+
+71 
+	}
+}
+
+75 
+	$š‹rmedŸ‹_dige¡s
+(cÚ¡ 
+by‹
+ *
+m
+, 
+size_t
+ 
+Ën
+, by‹ *
+h
+){
+
+78 
+by‹
+ 
+hash
+[
+HLEN
+] = {0};
+
+80 
+i
+ = 0; i < 
+HLEN
+; i++){
+
+81 
+hash
+[
+i
+] = (
+IV
+ >> (i*8)) & 0xFF;
+
+84 
+	`memýy
+(
+h
+, 
+hash
+, 
+HLEN
+);
+
+87 
+size_t
+ 
+nb_blocks
+ = (
+Ën
+ + 
+BLEN
+ - 1) / BLEN;
+
+90 
+by‹
+ *
+mes§ge
+ = 
+	`ÿÎoc
+(
+nb_blocks
+ * 
+BLEN
+, 1);
+
+92 
+	`memýy
+(
+mes§ge
+,
+m
+,
+Ën
+);
+
+96 
+i
+ = 0;
+
+97 
+i
+ = 0; i < 
+nb_blocks
+; i++){
+
+98 
+	`com´essiÚ
+(
+hash
+,
+mes§ge
+ + 
+i
+ * 
+BLEN
+);
+
+99 
+	`memýy
+(
+h
+ + ((
+i
+ + 1)* 
+HLEN
+),
+hash
+,HLEN);
+
+105 
+by‹
+ *
+Ï¡_block
+ = 
+	`ÿÎoc
+(
+BLEN
+,1);
+
+107 
+b™_Ëngth
+ = ()
+Ën
+ * 8;
+
+108 
+	`memýy
+(
+Ï¡_block
+,&
+b™_Ëngth
+,());
+
+111 
+	`com´essiÚ
+(
+hash
+,
+Ï¡_block
+);
+
+112 
+	`memýy
+(
+h
+ + ((
+i
+ + 1è* 
+HLEN
+),
+hash
+,HLEN);
+
+115 
+	`ä“
+(
+mes§ge
+);
+
+116 
+	`ä“
+(
+Ï¡_block
+);
+
+118 
+	}
+}
+
 	@hash.h
 
 1 #iâdeà
@@ -143,7 +519,33 @@ HASH_H
 	~"utžs.h
 "
 
-10 
+10 #ià
+BLOCKSIZE
+ == 48
+
+12 
+	#IV
+ 0x050403020100
+
+	)
+
+14 #–ià
+BLOCKSIZE
+ == 64
+
+16 
+	#IV
+ 0x0706050403020100
+
+	)
+
+20 
+	#IV
+ 0x03020100
+
+	)
+
+24 
 com´essiÚ
 (
 by‹
@@ -157,7 +559,7 @@ m
 BLEN
 ]);
 
-11 
+25 
 hash
 (cÚ¡ 
 by‹
@@ -173,7 +575,7 @@ h
 HLEN
 ]);
 
-12 
+26 
 š‹rmedŸ‹_dige¡s
 (cÚ¡ 
 by‹
@@ -186,6 +588,548 @@ size_t
 , by‹ *
 h
 );
+
+	@test_hash.c
+
+1 
+	~<¡dio.h
+>
+
+2 
+	~<¡ršg.h
+>
+
+3 
+	~<¡dlib.h
+>
+
+4 
+	~"hash.h
+"
+
+5 
+	~"utžs.h
+"
+
+10 #ià
+BLOCKSIZE
+ == 32
+
+11 
+	#SPECK_M
+ "db608390"
+
+	)
+
+12 
+	#HASH_M2
+ "0123456789abcdef"
+
+	)
+
+13 
+	#HASH_M3
+ "0123456789abcdef0123456789abcdef"
+
+	)
+
+14 #–ià
+BLOCKSIZE
+ == 48
+
+15 
+	#SPECK_M
+ "dad97e7053—"
+
+	)
+
+16 
+	#HASH_M2
+ "0123456789abcdef01234567"
+
+	)
+
+17 
+	#HASH_M3
+ "0123456789abcdef0123456789abcdef0123456789abcdef"
+
+	)
+
+19 
+	#SPECK_M
+ "8c8f4a901e18661a"
+
+	)
+
+20 
+	#HASH_M2
+ "0123456789abcdef0123456789abcdef"
+
+	)
+
+21 
+	#HASH_M3
+ "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
+	)
+
+25 
+	#SPECK_K
+ "0123456789abcdef0123456789abcdef"
+
+	)
+
+28 
+	$‹¡_¥eck
+() {
+
+29 
+	`´štf
+("*** SPECK\n");
+
+30 
+by‹
+ 
+k
+[
+KLEN
+], 
+m
+[
+MLEN
+], 
+c
+[MLEN];
+
+32 
+	`»ad_by‹s
+(
+SPECK_K
+, 
+k
+, 
+KLEN
+);
+
+33 
+	`»ad_by‹s
+(
+SPECK_M
+, 
+m
+, 
+MLEN
+);
+
+35 
+	`´štf
+("Key:\n k = ");
+
+36 
+	`´št_by‹s
+(
+k
+, 
+KLEN
+);
+
+37 
+	`´štf
+("\n");
+
+39 
+	`´štf
+("Message block:\n m = ");
+
+40 
+	`´št_by‹s
+(
+m
+, 
+MLEN
+);
+
+41 
+	`´štf
+("\n");
+
+43 
+	`¥eck_’c
+(
+k
+, 
+m
+, 
+c
+);
+
+44 
+	`´štf
+("Ciphertext block: c = ");
+
+45 
+	`´št_by‹s
+(
+c
+, 
+MLEN
+);
+
+46 
+	`´štf
+("\n");
+
+47 
+	}
+}
+
+49 
+	$‹¡_com´essiÚ
+() {
+
+50 
+	`´štf
+("*** COMPRESSION\n");
+
+51 
+by‹
+ 
+m
+[
+BLEN
+], 
+h
+[
+HLEN
+];
+
+54 
+	`»ad_by‹s
+(
+SPECK_K
+, 
+m
+, 
+BLEN
+);
+
+57 
+i
+ = 0; i < 
+HLEN
+; i++)
+
+58 
+h
+[
+i
+] = (
+IV
+ >> (i * 8)) & 0xFF;
+
+60 
+	`´štf
+("m = ");
+
+61 
+	`´št_by‹s
+(
+m
+, 
+BLEN
+);
+
+62 
+	`´štf
+("\n");
+
+64 
+	`´štf
+("h0 = ");
+
+65 
+	`´št_by‹s
+(
+h
+, 
+HLEN
+);
+
+66 
+	`´štf
+("\n");
+
+69 
+	`com´essiÚ
+(
+h
+, 
+m
+);
+
+71 
+	`´štf
+("f(h0,m) = ");
+
+72 
+	`´št_by‹s
+(
+h
+, 
+HLEN
+);
+
+73 
+	`´štf
+("\n");
+
+74 
+	}
+}
+
+77 
+	$‹¡_hash_sšgË
+(cÚ¡ *
+hex_msg
+) {
+
+78 
+size_t
+ 
+hex_Ën
+ = 
+	`¡¾’
+(
+hex_msg
+);
+
+79 
+size_t
+ 
+Ën
+ = 
+hex_Ën
+ / 2;
+
+82 
+by‹
+ *
+m
+ = 
+	`ÿÎoc
+(
+Ën
+, 1);
+
+83 
+	`»ad_by‹s
+((*)
+hex_msg
+, 
+m
+, 
+Ën
+);
+
+85 
+	`´štf
+("Mes§ge: m = %s\n", 
+hex_msg
+);
+
+88 
+by‹
+ 
+h
+[
+HLEN
+];
+
+89 
+	`hash
+(
+m
+, 
+Ën
+, 
+h
+);
+
+90 
+	`´štf
+("Digest: h = ");
+
+91 
+	`´št_by‹s
+(
+h
+, 
+HLEN
+);
+
+92 
+	`´štf
+("\n");
+
+95 
+size_t
+ 
+nb_blocks
+ = (
+Ën
+ + 
+BLEN
+ - 1) / BLEN + 1;
+
+96 
+size_t
+ 
+nb_dige¡s
+ = 
+nb_blocks
+ + 1;
+
+97 
+by‹
+ *
+hs
+ = 
+	`ÿÎoc
+(
+nb_dige¡s
+ * 
+HLEN
+, 1);
+
+98 
+	`š‹rmedŸ‹_dige¡s
+(
+m
+, 
+Ën
+, 
+hs
+);
+
+99 
+	`´štf
+("Intermediate digests:\n");
+
+100 
+size_t
+ 
+i
+ = 0; i < 
+nb_dige¡s
+; i++) {
+
+101 
+	`´štf
+("h[%zu] = ", 
+i
+);
+
+102 
+	`´št_by‹s
+(
+hs
+ + 
+i
+ * 
+HLEN
+, HLEN);
+
+103 
+	`´štf
+("\n");
+
+106 
+	`ä“
+(
+m
+);
+
+107 
+	`ä“
+(
+hs
+);
+
+108 
+	}
+}
+
+111 
+	$‹¡_hash
+() {
+
+112 
+	`´štf
+("*** HASH\n");
+
+113 
+	`‹¡_hash_sšgË
+("01");
+
+114 
+	`‹¡_hash_sšgË
+(
+HASH_M2
+);
+
+115 
+	`‹¡_hash_sšgË
+(
+HASH_M3
+);
+
+116 
+	}
+}
+
+118 
+	$maš
+() {
+
+119 
+	`´štf
+("==========================\n");
+
+120 
+	`´štf
+("Mes§gsize: %d (%d by‹s)\n", 
+BLOCKSIZE
+, 
+MLEN
+);
+
+121 
+	`´štf
+("Key size: %d (%d by‹s)\n", 
+BLOCKSIZE
+ * 2, 
+KLEN
+);
+
+122 
+	`´štf
+("==========================\n");
+
+124 
+	`‹¡_¥eck
+();
+
+125 
+	`‹¡_com´essiÚ
+();
+
+126 
+	`‹¡_hash
+();
+
+129 
+	}
+}
 
 	@test_speck.c
 
@@ -28948,10 +29892,12 @@ _SIGSET_NWORDS
 .
 1
 /usr/include
-79
-2345
+81
+2364
 attack.h
+hash.c
 hash.h
+test_hash.c
 test_speck.c
 utils.c
 utils.h
