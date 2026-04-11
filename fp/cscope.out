@@ -1,4 +1,4 @@
-cscope 15 $HOME/M1/MoSIG/S2 Courses/Crypto/TP/MoSIG_Crypto_TP/fp               0000175533
+cscope 15 $HOME/M1/MoSIG/S2 Courses/Crypto/TP/MoSIG_Crypto_TP/fp               0000175535
 	@attack.h
 
 1 
@@ -893,7 +893,7 @@ HLEN
 hex_msg
 ) {
 
-78 
+80 
 size_t
  
 hex_Àn
@@ -903,7 +903,7 @@ hex_Àn
 hex_msg
 );
 
-79 
+81 
 size_t
  
 Àn
@@ -911,7 +911,7 @@ size_t
 hex_Àn
  / 2;
 
-82 
+84 
 byã
  *
 m
@@ -921,7 +921,7 @@ m
 Àn
 , 1);
 
-83 
+85 
 	`ªad_byãs
 ((*)
 hex_msg
@@ -931,13 +931,13 @@ m
 Àn
 );
 
-85 
+87 
 	`¥ötf
 ("Mesßge: m = %s\n", 
 hex_msg
 );
 
-88 
+90 
 byã
  
 h
@@ -945,7 +945,7 @@ h
 HLEN
 ];
 
-89 
+91 
 	`hash
 (
 m
@@ -955,11 +955,11 @@ m
 h
 );
 
-90 
+92 
 	`¥ötf
 ("Digest: h = ");
 
-91 
+93 
 	`¥öt_byãs
 (
 h
@@ -967,11 +967,11 @@ h
 HLEN
 );
 
-92 
+94 
 	`¥ötf
 ("\n");
 
-95 
+97 
 size_t
  
 nb_blocks
@@ -981,7 +981,7 @@ nb_blocks
 BLEN
  - 1) / BLEN + 1;
 
-96 
+98 
 size_t
  
 nb_dige°s
@@ -989,7 +989,7 @@ nb_dige°s
 nb_blocks
  + 1;
 
-97 
+99 
 byã
  *
 hs
@@ -1001,7 +1001,7 @@ nb_dige°s
 HLEN
 , 1);
 
-98 
+100 
 	`öãrmedüã_dige°s
 (
 m
@@ -1011,11 +1011,11 @@ m
 hs
 );
 
-99 
+101 
 	`¥ötf
 ("Intermediate digests:\n");
 
-100 
+102 
 size_t
  
 i
@@ -1023,13 +1023,13 @@ i
 nb_dige°s
 ; i++) {
 
-101 
+103 
 	`¥ötf
 ("h[%zu] = ", 
 i
 );
 
-102 
+104 
 	`¥öt_byãs
 (
 hs
@@ -1039,63 +1039,63 @@ i
 HLEN
 , HLEN);
 
-103 
+105 
 	`¥ötf
 ("\n");
 
-106 
+108 
 	`‰ì
 (
 m
 );
 
-107 
+109 
 	`‰ì
 (
 hs
 );
 
-108 
+110 
 	}
 }
 
-111 
+113 
 	$ã°_hash
 () {
 
-112 
+114 
 	`¥ötf
 ("*** HASH\n");
 
-113 
+115 
 	`ã°_hash_sögÀ
 ("01");
 
-114 
+116 
 	`ã°_hash_sögÀ
 (
 HASH_M2
 );
 
-115 
+117 
 	`ã°_hash_sögÀ
 (
 HASH_M3
 );
 
-116 
+118 
 	}
 }
 
-118 
+120 
 	$maö
 () {
 
-119 
+121 
 	`¥ötf
 ("==========================\n");
 
-120 
+122 
 	`¥ötf
 ("Mesßgêsize: %d (%d byãs)\n", 
 BLOCKSIZE
@@ -1103,7 +1103,7 @@ BLOCKSIZE
 MLEN
 );
 
-121 
+123 
 	`¥ötf
 ("Key size: %d (%d byãs)\n", 
 BLOCKSIZE
@@ -1111,23 +1111,23 @@ BLOCKSIZE
 KLEN
 );
 
-122 
+124 
 	`¥ötf
 ("==========================\n");
 
-124 
+127 
 	`ã°_•eck
 ();
 
-125 
+128 
 	`ã°_com¥essi⁄
 ();
 
-126 
+129 
 	`ã°_hash
 ();
 
-129 
+132 
 	}
 }
 

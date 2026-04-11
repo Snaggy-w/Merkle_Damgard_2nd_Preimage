@@ -3,14 +3,14 @@
 #include "utils.h"
 #include "hash.h"
 
-#define HASHSIZE (1<<24)
-#define HASH(h) (h[0] + (h[1]<<8) + (h[2]<<16))
+#define HASHSIZE (1<<24) // hashtable size (2^24): 3 bytes to represent the index in hashtable
+#define HASH(h) (h[0] + (h[1]<<8) + (h[2]<<16)) // take the first 3 bytes of hash digest
 
 typedef struct
 {
-    byte h[HLEN];
-    byte m[BLEN];
-    int8_t side;
+    byte h[HLEN]; // the digest
+    byte m[BLEN]; // the block that produced the digest
+    int8_t side; // from which side the entry came: left = 1, right = -1, neither (empty cell) = 0
 } cell;
 
 typedef cell* hash_tbl;
