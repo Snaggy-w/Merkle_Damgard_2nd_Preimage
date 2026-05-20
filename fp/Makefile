@@ -1,6 +1,6 @@
 CC=clang
 BLOCKSIZE=32
-CFLAGS=-O3 -march=native -DBLOCKSIZE=$(BLOCKSIZE)
+CFLAGS=-O3 -march=native -DBLOCKSIZE=$(BLOCKSIZE) -pg
 LDLIBS=-lm
 
 default:
