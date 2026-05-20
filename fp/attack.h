@@ -3,7 +3,11 @@
 #include "utils.h"
 #include "hash.h"
 
+// hash size defined in the makefile to scale with block size (2^24 is not enough for 64 bit ones so we need larger tables to accomodate all entries in the table)
+#ifndef HASHSIZE
 #define HASHSIZE (1<<24) // hashtable size (2^24): 3 bytes to represent the index in hashtable
+#endif
+
 #define HASH(h) (h[0] + (h[1]<<8) + (h[2]<<16)) // take the first 3 bytes of hash digest
 
 typedef struct

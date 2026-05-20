@@ -4,6 +4,336 @@
 #include "utils.h"
 #include "attack.h"
 
+
+// 3 versions: 
+// 	- the original (at the very bottom in the else block), sequential
+// 	- OMP accelerated version 
+//	- GPU accelerated version with HIP which should work on both AMD HIP and nvidia CUDA
+
+
+#ifdef USE_HIP
+#include <stdint.h>
+#include <stdatomic.h>
+
+/* Declared in gpu_linkmsg.hip, compiled separately by hipcc */
+extern double gpu_linkmsg(uint8_t *ml, int *ind, const uint8_t *hf, const uint8_t *h, size_t len);
+
+double collision(byte ms[BLEN], byte mf[BLEN], byte hf[HLEN]) {
+ 
+    hash_tbl tbl = calloc(HASHSIZE, sizeof(cell));
+ 
+    byte h0[HLEN];
+    for (int i = 0; i < HLEN; i++)
+        h0[i] = (IV >> (i * 8)) & 0xFF;
+ 
+    byte zero[HLEN] = {0};
+ 
+    /* Shared result written by the winning thread. */
+    volatile atomic_int found = 0;   /* 0 = searching, 1 = done         */
+    byte   res_ms[BLEN], res_mf[BLEN], res_hf[HLEN];
+    atomic_llong total_count = 0;    /* accumulate across threads        */
+ 
+    #pragma omp parallel shared(tbl, found, total_count, res_ms, res_mf, res_hf)
+    {
+        byte block[BLEN], tmp[HLEN];
+        long long local_count = 0;
+ 
+        while (!atomic_load_explicit(&found, memory_order_relaxed)) {
+ 
+            /* ---- LEFT side: f(h0, ms) -------------------------------- */
+            random_bytes(block, BLEN);
+            local_count++;
+ 
+            memcpy(tmp, h0, HLEN);
+            compression(tmp, block);                /* tmp = f(h0, ms)  */
+ 
+            uint32_t idx = HASH(tmp) % HASHSIZE;
+ 
+            /* Check for a right-side entry written by any thread. */
+            if (tbl[idx].side == -1 && memcmp(tmp, tbl[idx].h, HLEN) == 0) {
+                /* Only the first thread to reach here records the result. */
+                int expected = 0;
+                if (atomic_compare_exchange_strong(&found, &expected, 1)) {
+                    memcpy(res_ms, block,         BLEN);
+                    memcpy(res_mf, tbl[idx].m,    BLEN);
+                    memcpy(res_hf, tmp,           HLEN);
+                }
+            } else if (tbl[idx].side == 0) {
+                /* Empty slot — write left-side entry.
+                 * Two threads could race here; the second write is
+                 * harmless because both entries are valid left-side
+                 * candidates that will be re-verified on match.        */
+                memcpy(tbl[idx].h, tmp,   HLEN);
+                memcpy(tbl[idx].m, block, BLEN);
+                tbl[idx].side = 1;
+            }
+ 
+            if (atomic_load_explicit(&found, memory_order_relaxed)) break;
+ 
+            /* ---- RIGHT side: E^{-1}_mf(0) --------------------------- */
+            random_bytes(block, BLEN);
+            local_count++;
+ 
+            speck_dec(block, tmp, zero);            /* tmp = E^-1_mf(0) */
+ 
+            idx = HASH(tmp) % HASHSIZE;
+ 
+            if (tbl[idx].side == 1 && memcmp(tmp, tbl[idx].h, HLEN) == 0) {
+                int expected = 0;
+                if (atomic_compare_exchange_strong(&found, &expected, 1)) {
+                    memcpy(res_ms, tbl[idx].m, BLEN);
+                    memcpy(res_mf, block,      BLEN);
+                    memcpy(res_hf, tmp,        HLEN);
+                }
+            } else if (tbl[idx].side == 0) {
+                memcpy(tbl[idx].h, tmp,   HLEN);
+                memcpy(tbl[idx].m, block, BLEN);
+                tbl[idx].side = -1;
+            }
+        }
+ 
+        /* Each thread adds its local count atomically at the end. */
+        atomic_fetch_add(&total_count, local_count);
+    }
+ 
+    memcpy(ms, res_ms, BLEN);
+    memcpy(mf, res_mf, BLEN);
+    memcpy(hf, res_hf, HLEN);
+ 
+    free(tbl);
+    return (double)atomic_load(&total_count);
+}
+
+// wrapper around the GPU version
+double linkmsg(byte ml[BLEN], int *ind, const byte hf[HLEN], const byte *h, size_t len) {
+    return gpu_linkmsg(ml, ind, hf, h, len);
+}
+
+// nothing changed about the attack function
+double attack(const byte *m, size_t len, byte *m2) {
+    double count = 0;
+ 
+    byte ms[BLEN], mf[BLEN], hf[HLEN];
+    count += collision(ms, mf, hf);
+ 
+    size_t nb_blocks  = (len + BLEN - 1) / BLEN;
+    size_t nb_digests = nb_blocks + 2;
+    byte  *h          = calloc(nb_digests * HLEN, 1);
+    intermediate_digests(m, len, h);
+ 
+    byte ml[BLEN];
+    int  i;
+    count += linkmsg(ml, &i, hf, h, len);
+ 
+    int k = i - 2;
+    if (k < 0) {
+        fprintf(stderr, "attack failed: i=%d too small, need i >= 2\n", i);
+        free(h);
+        return count;
+    }
+ 
+    size_t suffix_len = (nb_blocks - i) * BLEN;
+    size_t offset     = 0;
+ 
+    memcpy(m2 + offset, ms, BLEN);
+    offset += BLEN;
+ 
+    for (int j = 0; j < k; j++) {
+        memcpy(m2 + offset, mf, BLEN);
+        offset += BLEN;
+    }
+ 
+    memcpy(m2 + offset, ml, BLEN);
+    offset += BLEN;
+ 
+    memcpy(m2 + offset, m + i * BLEN, suffix_len);
+ 
+    free(h);
+    return count;
+}
+
+
+
+// OMP version with no GPU acceleration
+#elif defined(_OPENMP)
+#include <stdatomic.h>
+
+double collision(byte ms[BLEN], byte mf[BLEN], byte hf[HLEN]) {
+ 
+    hash_tbl tbl = calloc(HASHSIZE, sizeof(cell));
+ 
+    byte h0[HLEN];
+    for (int i = 0; i < HLEN; i++)
+        h0[i] = (IV >> (i * 8)) & 0xFF;
+ 
+    byte zero[HLEN] = {0};
+ 
+    /* Shared result written by the winning thread. */
+    volatile atomic_int found = 0;   /* 0 = searching, 1 = done         */
+    byte   res_ms[BLEN], res_mf[BLEN], res_hf[HLEN];
+    atomic_llong total_count = 0;    /* accumulate across threads        */
+ 
+    #pragma omp parallel shared(tbl, found, total_count, res_ms, res_mf, res_hf)
+    {
+        byte block[BLEN], tmp[HLEN];
+        long long local_count = 0;
+ 
+        while (!atomic_load_explicit(&found, memory_order_relaxed)) {
+ 
+            /* ---- LEFT side: f(h0, ms) -------------------------------- */
+            random_bytes(block, BLEN);
+            local_count++;
+ 
+            memcpy(tmp, h0, HLEN);
+            compression(tmp, block);                /* tmp = f(h0, ms)  */
+ 
+            uint32_t idx = HASH(tmp) % HASHSIZE;
+ 
+            /* Check for a right-side entry written by any thread. */
+            if (tbl[idx].side == -1 && memcmp(tmp, tbl[idx].h, HLEN) == 0) {
+                /* Only the first thread to reach here records the result. */
+                int expected = 0;
+                if (atomic_compare_exchange_strong(&found, &expected, 1)) {
+                    memcpy(res_ms, block,         BLEN);
+                    memcpy(res_mf, tbl[idx].m,    BLEN);
+                    memcpy(res_hf, tmp,           HLEN);
+                }
+            } else if (tbl[idx].side == 0) {
+                /* Empty slot — write left-side entry.
+                 * Two threads could race here; the second write is
+                 * harmless because both entries are valid left-side
+                 * candidates that will be re-verified on match.        */
+                memcpy(tbl[idx].h, tmp,   HLEN);
+                memcpy(tbl[idx].m, block, BLEN);
+                tbl[idx].side = 1;
+            }
+ 
+            if (atomic_load_explicit(&found, memory_order_relaxed)) break;
+ 
+            /* ---- RIGHT side: E^{-1}_mf(0) --------------------------- */
+            random_bytes(block, BLEN);
+            local_count++;
+ 
+            speck_dec(block, tmp, zero);            /* tmp = E^-1_mf(0) */
+ 
+            idx = HASH(tmp) % HASHSIZE;
+ 
+            if (tbl[idx].side == 1 && memcmp(tmp, tbl[idx].h, HLEN) == 0) {
+                int expected = 0;
+                if (atomic_compare_exchange_strong(&found, &expected, 1)) {
+                    memcpy(res_ms, tbl[idx].m, BLEN);
+                    memcpy(res_mf, block,      BLEN);
+                    memcpy(res_hf, tmp,        HLEN);
+                }
+            } else if (tbl[idx].side == 0) {
+                memcpy(tbl[idx].h, tmp,   HLEN);
+                memcpy(tbl[idx].m, block, BLEN);
+                tbl[idx].side = -1;
+            }
+        }
+ 
+        /* Each thread adds its local count atomically at the end. */
+        atomic_fetch_add(&total_count, local_count);
+    }
+ 
+    memcpy(ms, res_ms, BLEN);
+    memcpy(mf, res_mf, BLEN);
+    memcpy(hf, res_hf, HLEN);
+ 
+    free(tbl);
+    return (double)atomic_load(&total_count);
+}
+
+double linkmsg(byte ml[BLEN], int *ind,
+               const byte hf[HLEN], const byte *h, size_t len)
+{
+    size_t nb_blocks = (len + BLEN - 1) / BLEN;
+ 
+    volatile atomic_int found = 0;
+    byte     res_ml[BLEN];
+    int      res_ind = -1;
+    atomic_llong total_count = 0;
+ 
+    #pragma omp parallel shared(found, total_count, res_ml, res_ind)
+    {
+        byte local_ml[BLEN], tmp[HLEN];
+        long long local_count = 0;
+ 
+        while (!atomic_load_explicit(&found, memory_order_relaxed)) {
+            random_bytes(local_ml, BLEN);
+            local_count++;
+ 
+            memcpy(tmp, hf, HLEN);
+            compression(tmp, local_ml);
+ 
+            /* Skip h[0] (IV) — same semantics as the original. */
+            for (size_t j = 1; j < nb_blocks; j++) {
+                if (memcmp(tmp, h + j * HLEN, HLEN) == 0) {
+                    int expected = 0;
+                    if (atomic_compare_exchange_strong(&found, &expected, 1)) {
+                        memcpy(res_ml, local_ml, BLEN);
+                        res_ind = (int)j;
+                    }
+                    break;
+                }
+            }
+        }
+ 
+        atomic_fetch_add(&total_count, local_count);
+    }
+ 
+    memcpy(ml, res_ml, BLEN);
+    *ind = res_ind;
+    return (double)atomic_load(&total_count);
+}
+
+double attack(const byte *m, size_t len, byte *m2) {
+    double count = 0;
+ 
+    byte ms[BLEN], mf[BLEN], hf[HLEN];
+    count += collision(ms, mf, hf);
+ 
+    size_t nb_blocks  = (len + BLEN - 1) / BLEN;
+    size_t nb_digests = nb_blocks + 2;
+    byte  *h          = calloc(nb_digests * HLEN, 1);
+    intermediate_digests(m, len, h);
+ 
+    byte ml[BLEN];
+    int  i;
+    count += linkmsg(ml, &i, hf, h, len);
+ 
+    int k = i - 2;
+    if (k < 0) {
+        fprintf(stderr, "attack failed: i=%d too small, need i >= 2\n", i);
+        free(h);
+        return count;
+    }
+ 
+    size_t suffix_len = (nb_blocks - i) * BLEN;
+    size_t offset     = 0;
+ 
+    memcpy(m2 + offset, ms, BLEN);
+    offset += BLEN;
+ 
+    for (int j = 0; j < k; j++) {
+        memcpy(m2 + offset, mf, BLEN);
+        offset += BLEN;
+    }
+ 
+    memcpy(m2 + offset, ml, BLEN);
+    offset += BLEN;
+ 
+    memcpy(m2 + offset, m + i * BLEN, suffix_len);
+ 
+    free(h);
+    return count;
+}
+
+
+
+// Original slow implementation
+#else
+
 /*
  * Step 1
  */
@@ -212,3 +542,4 @@ double attack(const byte *m, size_t len, byte *m2) {
     free(h);
     return count;
 }
+#endif
