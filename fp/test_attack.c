@@ -111,7 +111,8 @@ void test_full_attack(const byte *m, size_t len) {
     hash(m, len, hm);
 
     // allocate m2 to be same length as m
-    byte *m2 = calloc(len, 1);
+    size_t nb_blocks = (len + BLEN - 1) / BLEN;
+    byte *m2 = calloc(nb_blocks * BLEN, 1);//calloc(len, 1);
     double count = attack(m, len, m2);
 
     // compute H(m2) to prove that it should be equal to H(m)
