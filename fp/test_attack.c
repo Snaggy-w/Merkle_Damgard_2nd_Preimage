@@ -17,11 +17,13 @@
     #define MSG_LEN 16777446 // the message length of the pdf demo
     #define PRINT_BYTES 120  // bytes to print on each truncation of the output
 #else
-    // idk honestly...
+    // MSG_LEN for the challenge 0^32 (I presume 32 bits of zeros)
     #define MSG_LEN (1 << 32)
     #define PRINT_BYTES 160
 #endif
 
+
+#if BLOCKSIZE != 64
 
 // truncated print hex encoded bytes
 void print_truncated(const byte *m, size_t len) {
@@ -155,3 +157,152 @@ int main() {
     free(m);
     return 0;
 }
+
+
+// 64 bit challenge
+#else
+
+static void print_hex(const byte *buf, size_t n) {
+    for (size_t i = 0; i < n; i++)
+        printf("%02x", buf[i]);
+}
+
+int main(void) {
+    fprintf(stderr, "BLOCKSIZE=64 attack on 0^{2^32}\n");
+    fprintf(stderr, "Target message: 2^32 zero bytes\n\n");
+
+    /* MSG_LEN = (size_t)1 << 32 — must use size_t to avoid 32-bit UB. */
+    const size_t len = (size_t)1 << 32;
+
+    /* ------------------------------------------------------------------ *
+     * Step 0 – allocate and zero-fill the target message.                *
+     * calloc gives zeroed memory, which is exactly our target: 0^{2^32}. *
+     * ------------------------------------------------------------------ */
+    fprintf(stderr, "Allocating target message (%.1f GB)...\n",
+            (double)len / (1ULL << 30));
+    byte *m = calloc(len, 1);
+    if (!m) { fprintf(stderr, "OOM allocating m\n"); return 1; }
+
+    /* ------------------------------------------------------------------ *
+     * Step 1 – find fixed-point collision:                               *
+     *   h0 -[ms]-> hf  and  E^{-1}_{mf}(0) = hf                        *
+     * ------------------------------------------------------------------ */
+    fprintf(stderr, "Step 1: collision search...\n");
+    byte ms[BLEN], mf[BLEN], hf[HLEN];
+    double count = 0.0;
+    count += collision(ms, mf, hf);
+    fprintf(stderr, "  collision found using ~2^%.2f samples\n", log2(count));
+
+    /* ------------------------------------------------------------------ *
+     * Step 2 – compute all intermediate digests of m.                   *
+     * ------------------------------------------------------------------ */
+    fprintf(stderr, "Step 2: computing intermediate digests (~2 GB)...\n");
+    size_t nb_blocks  = (len + BLEN - 1) / BLEN;   /* = 2^28 */
+    size_t nb_digests = nb_blocks + 2;
+    byte  *h          = calloc(nb_digests, HLEN);
+    if (!h) { fprintf(stderr, "OOM allocating digest array\n"); free(m); return 1; }
+    intermediate_digests(m, len, h);
+
+    /* We no longer need the raw message bytes. */
+    free(m);  m = NULL;
+
+    /* ------------------------------------------------------------------ *
+     * Step 3 – find linking block ml such that f(hf, ml) = h[i].        *
+     * ------------------------------------------------------------------ */
+    fprintf(stderr, "Step 3: linkmsg search...\n");
+    byte ml[BLEN];
+    int  link_idx;
+    count += linkmsg(ml, &link_idx, hf, h, len);
+    fprintf(stderr, "  linkmsg found using ~2^%.2f samples (i=%d)\n",
+            log2(count), link_idx);
+
+    free(h);  h = NULL;
+
+    /* ------------------------------------------------------------------ *
+     * Step 4 – compute k and suffix.                                     *
+     *                                                                     *
+     * m2 = ms || mf^k || ml || 0^suffix_zeros                           *
+     * k = link_idx - 2  (so total block count equals nb_blocks)         *
+     * suffix is zero bytes because m was all zeros.                      *
+     * ------------------------------------------------------------------ */
+    if (link_idx < 2) {
+        fprintf(stderr, "Attack failed: link_idx=%d < 2\n", link_idx);
+        return 1;
+    }
+
+    /* Use long long / size_t to avoid overflow for large indices. */
+    long long  k            = (long long)link_idx - 2;
+    size_t     suffix_zeros = ((size_t)(nb_blocks - (size_t)link_idx)) * (size_t)BLEN;
+    size_t     total_bytes  = (size_t)BLEN              /* ms */
+                            + (size_t)k * (size_t)BLEN  /* mf^k */
+                            + (size_t)BLEN              /* ml */
+                            + suffix_zeros;             /* zeros */
+
+    fprintf(stderr, "\nParameters for m2:\n");
+    fprintf(stderr, "  k            = %lld  (mf repetitions)\n", k);
+    fprintf(stderr, "  suffix_zeros = %zu bytes\n", suffix_zeros);
+    fprintf(stderr, "  total m2     = %zu bytes (should equal %zu)\n",
+            total_bytes, len);
+    fprintf(stderr, "\nPrinting Python generator script to stdout...\n");
+
+    /* ------------------------------------------------------------------ *
+     * Step 5 – emit the Python script.                                   *
+     *                                                                     *
+     * The script streams m2 to sys.stdout.buffer in memory-efficient     *
+     * chunks, never building the full multi-GB bytes object at once.     *
+     * ------------------------------------------------------------------ */
+    printf("#!/usr/bin/env python3\n");
+    printf("\"\"\"Generated by test_attack (BLOCKSIZE=64).\n");
+    printf("\n");
+    printf("Outputs m2, a second preimage of 0^{2^32}, to stdout as raw bytes.\n");
+    printf("\n");
+    printf("Usage:\n");
+    printf("    python3 gen_m2.py > m2.bin          # write ~4 GB to disk\n");
+    printf("    python3 gen_m2.py | sha256sum        # pipe anywhere\n");
+    printf("\n");
+    printf("m2 structure:  ms || mf^k || ml || 0^suffix_zeros\n");
+    printf("Total size:    %zu bytes\n", total_bytes);
+    printf("Attack used:  ~2^%.2f compression-function calls\n", log2(count));
+    printf("\"\"\"\n");
+    printf("import sys\n\n");
+
+    /* The three key blocks (hard-coded hex literals). */
+    printf("ms           = bytes.fromhex('"); print_hex(ms, BLEN); printf("')\n");
+    printf("mf           = bytes.fromhex('"); print_hex(mf, BLEN); printf("')\n");
+    printf("ml           = bytes.fromhex('"); print_hex(ml, BLEN); printf("')\n");
+    printf("k            = %lld\n", k);
+    printf("suffix_zeros = %zu\n", suffix_zeros);
+    printf("\n");
+    printf("out = sys.stdout.buffer\n\n");
+
+    /* ms */
+    printf("out.write(ms)\n\n");
+
+    /* mf^k — write in chunks of REPS_PER_CHUNK copies to stay memory-light. */
+    printf("# Write mf repeated k times in large chunks.\n");
+    printf("if k > 0:\n");
+    printf("    REPS = max(1, 65536 // len(mf))  # ~4096 for BLEN=16\n");
+    printf("    chunk = mf * REPS\n");
+    printf("    full, rem = divmod(k, REPS)\n");
+    printf("    for _ in range(full):\n");
+    printf("        out.write(chunk)\n");
+    printf("    if rem:\n");
+    printf("        out.write(mf * rem)\n\n");
+
+    /* ml */
+    printf("out.write(ml)\n\n");
+
+    /* zero suffix — chunked so Python never builds a huge bytes object. */
+    printf("# Zero suffix (original message was all zeros).\n");
+    printf("if suffix_zeros > 0:\n");
+    printf("    CHUNK = 1 << 16  # 64 KB\n");
+    printf("    buf   = bytearray(CHUNK)\n");
+    printf("    left  = suffix_zeros\n");
+    printf("    while left > 0:\n");
+    printf("        n = min(CHUNK, left)\n");
+    printf("        out.write(memoryview(buf)[:n])\n");
+    printf("        left -= n\n");
+
+    return 0;
+}
+#endif
