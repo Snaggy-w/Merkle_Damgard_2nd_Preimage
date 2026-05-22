@@ -1,5 +1,6 @@
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include "hash.h"
 #include "utils.h"
 #include "attack.h"
@@ -12,25 +13,58 @@ typedef struct {
 	int32_t idx; 
 } lut_entry;
 
+//static lut_entry *build_lut(const byte *h, size_t nb_blocks, uint32_t *mask_out)
+//{
+//    size_t sz = 1;
+//    while (sz < nb_blocks * 4) sz <<= 1;   /* next power-of-2 for cheap & masking */
+//    *mask_out = (uint32_t)(sz - 1);
+//
+//    lut_entry *lut = malloc(sz * sizeof(lut_entry));
+//    if (!lut) return NULL;
+//    for (size_t i = 0; i < sz; i++) lut[i].idx = -1;   /* mark all empty */
+//
+//    /* Insert h[1 .. nb_blocks-1]; skip h[0]=IV, matching linkmsg semantics. */
+//    for (size_t j = 1; j < nb_blocks; j++) {
+//        const byte *d = h + j * HLEN;
+//        uint32_t slot = HASH(d) & *mask_out;
+//        while (lut[slot].idx != -1)         /* linear probe past occupied slots  */
+//            slot = (slot + 1) & *mask_out;
+//        memcpy(lut[slot].digest, d, HLEN);
+//        lut[slot].idx = (int32_t)j;
+//    }
+//    return lut;
+//}
+
 static lut_entry *build_lut(const byte *h, size_t nb_blocks, uint32_t *mask_out)
 {
+    printf("Building LUT for linkmsg\n");
+    /* Cap LUT at 2^28 entries (~3 GB for HLEN=8) regardless of nb_blocks.
+     * For 64-bit the birthday bound means most hits will be in early blocks
+     * anyway; missing late blocks just means the attack retries. */
     size_t sz = 1;
-    while (sz < nb_blocks * 4) sz <<= 1;   /* next power-of-2 for cheap & masking */
+    size_t target = nb_blocks * 4;
+    if (target > (size_t)1 << 28) target = (size_t)1 << 28;  /* hard cap */
+    while (sz < target) sz <<= 1;
     *mask_out = (uint32_t)(sz - 1);
-
+    printf("after first LUT loop\n");
     lut_entry *lut = malloc(sz * sizeof(lut_entry));
     if (!lut) return NULL;
-    for (size_t i = 0; i < sz; i++) lut[i].idx = -1;   /* mark all empty */
-
-    /* Insert h[1 .. nb_blocks-1]; skip h[0]=IV, matching linkmsg semantics. */
-    for (size_t j = 1; j < nb_blocks; j++) {
+    for (size_t i = 0; i < sz; i++) lut[i].idx = -1;
+    printf("after second LUT loop\n");
+    /* Only insert blocks that fit within the table's load factor.
+     * With sz/4 load factor, probe chains stay short. */
+    size_t inserted = 0;
+    size_t capacity = sz / 4;
+    for (size_t j = 1; j < nb_blocks && inserted < capacity; j++) {
         const byte *d = h + j * HLEN;
         uint32_t slot = HASH(d) & *mask_out;
-        while (lut[slot].idx != -1)         /* linear probe past occupied slots  */
+        while (lut[slot].idx != -1)
             slot = (slot + 1) & *mask_out;
         memcpy(lut[slot].digest, d, HLEN);
-        lut[slot].idx = (int32_t)j;
+        lut[slot].idx = (int32_t)(j > INT32_MAX ? INT32_MAX : j);
+        inserted++;
     }
+    printf("after third LUT loop\n");
     return lut;
 }
 
