@@ -162,6 +162,69 @@ int main() {
 // 64 bit challenge
 #else
 
+/* ------------------------------------------------------------------ *
+ * Checkpoint helpers — save/load each expensive step to a small file *
+ * so the program can resume after a crash or Ctrl-C.                 *
+ *                                                                     *
+ * File formats (raw binary, no padding):                             *
+ *   ckpt_collision.bin : ms[BLEN] | mf[BLEN] | hf[HLEN] | count(double) *
+ *   ckpt_linkmsg.bin   : ml[BLEN] | link_idx(int) | count(double)    *
+ *                                                                     *
+ * Delete the files to force a full restart.                          *
+ * ------------------------------------------------------------------ */
+
+#define CKPT_COLLISION "ckpt_collision.bin"
+#define CKPT_LINKMSG   "ckpt_linkmsg.bin"
+
+static int save_collision(const byte *ms, const byte *mf,
+                          const byte *hf, double count)
+{
+    FILE *f = fopen(CKPT_COLLISION, "wb");
+    if (!f) { perror("save_collision"); return 0; }
+    int ok = fwrite(ms,     1,              BLEN, f) == (size_t)BLEN
+          && fwrite(mf,     1,              BLEN, f) == (size_t)BLEN
+          && fwrite(hf,     1,              HLEN, f) == (size_t)HLEN
+          && fwrite(&count, sizeof(double), 1,    f) == 1;
+    fclose(f);
+    if (ok) fprintf(stderr, "  saved %s\n", CKPT_COLLISION);
+    return ok;
+}
+
+static int load_collision(byte *ms, byte *mf, byte *hf, double *count)
+{
+    FILE *f = fopen(CKPT_COLLISION, "rb");
+    if (!f) return 0;
+    int ok = fread(ms,     1,              BLEN, f) == (size_t)BLEN
+          && fread(mf,     1,              BLEN, f) == (size_t)BLEN
+          && fread(hf,     1,              HLEN, f) == (size_t)HLEN
+          && fread(count,  sizeof(double), 1,    f) == 1;
+    fclose(f);
+    return ok;
+}
+
+static int save_linkmsg(const byte *ml, int link_idx, double count)
+{
+    FILE *f = fopen(CKPT_LINKMSG, "wb");
+    if (!f) { perror("save_linkmsg"); return 0; }
+    int ok = fwrite(ml,        1,              BLEN, f) == (size_t)BLEN
+          && fwrite(&link_idx, sizeof(int),    1,    f) == 1
+          && fwrite(&count,    sizeof(double), 1,    f) == 1;
+    fclose(f);
+    if (ok) fprintf(stderr, "  saved %s\n", CKPT_LINKMSG);
+    return ok;
+}
+
+static int load_linkmsg(byte *ml, int *link_idx, double *count)
+{
+    FILE *f = fopen(CKPT_LINKMSG, "rb");
+    if (!f) return 0;
+    int ok = fread(ml,        1,              BLEN, f) == (size_t)BLEN
+          && fread(link_idx,  sizeof(int),    1,    f) == 1
+          && fread(count,     sizeof(double), 1,    f) == 1;
+    fclose(f);
+    return ok;
+}
+
 static void print_hex(const byte *buf, size_t n) {
     for (size_t i = 0; i < n; i++)
         printf("%02x", buf[i]);
@@ -184,14 +247,22 @@ int main(void) {
     if (!m) { fprintf(stderr, "OOM allocating m\n"); return 1; }
 
     /* ------------------------------------------------------------------ *
-     * Step 1 – find fixed-point collision:                               *
-     *   h0 -[ms]-> hf  and  E^{-1}_{mf}(0) = hf                        *
+     * Step 1 – find fixed-point collision (or load from checkpoint).     *
      * ------------------------------------------------------------------ */
-    fprintf(stderr, "Step 1: collision search...\n");
     byte ms[BLEN], mf[BLEN], hf[HLEN];
     double count = 0.0;
-    count += collision(ms, mf, hf);
-    fprintf(stderr, "  collision found using ~2^%.2f samples\n", log2(count));
+    double c1 = 0.0;
+    if (load_collision(ms, mf, hf, &c1)) {
+        fprintf(stderr, "Step 1: loaded from %s (~2^%.2f samples)\n",
+                CKPT_COLLISION, log2(c1));
+        count += c1;
+    } else {
+        fprintf(stderr, "Step 1: collision search...\n");
+        c1 = collision(ms, mf, hf);
+        count += c1;
+        fprintf(stderr, "  collision found using ~2^%.2f samples\n", log2(c1));
+        save_collision(ms, mf, hf, c1);
+    }
 
     /* ------------------------------------------------------------------ *
      * Step 2 – compute all intermediate digests of m.                   *
@@ -207,15 +278,23 @@ int main(void) {
     free(m);  m = NULL;
 
     /* ------------------------------------------------------------------ *
-     * Step 3 – find linking block ml such that f(hf, ml) = h[i].        *
+     * Step 3 – find linking block ml (or load from checkpoint).          *
      * ------------------------------------------------------------------ */
-    fprintf(stderr, "Step 3: linkmsg search...\n");
     byte ml[BLEN];
     int  link_idx;
-    count += linkmsg(ml, &link_idx, hf, h, len);
-    fprintf(stderr, "  linkmsg found using ~2^%.2f samples (i=%d)\n",
-            log2(count), link_idx);
-
+    double c3 = 0.0;
+    if (load_linkmsg(ml, &link_idx, &c3)) {
+        fprintf(stderr, "Step 3: loaded from %s (link_idx=%d, ~2^%.2f samples)\n",
+                CKPT_LINKMSG, link_idx, log2(c3));
+        count += c3;
+    } else {
+        fprintf(stderr, "Step 3: linkmsg search...\n");
+        c3 = linkmsg(ml, &link_idx, hf, h, len);
+        count += c3;
+        fprintf(stderr, "  linkmsg found using ~2^%.2f samples (i=%d)\n",
+                log2(c3), link_idx);
+        save_linkmsg(ml, link_idx, c3);
+    }
     free(h);  h = NULL;
 
     /* ------------------------------------------------------------------ *
