@@ -159,9 +159,89 @@ int main() {
 }
 
 
-// 64 bit challenge
+// 64-bit challenge
+//
+// Target message: 2^32 zero bytes  (0^{2^32} in crypto notation)
+// We cannot materialise the ~4 GB second preimage m2 in memory, so instead
+// we print a self-contained Python 3 script to stdout.  Redirect it to a file:
+//
+//   ./test_attack > gen_m2.py
+//   python3 gen_m2.py > m2.bin          # streams ~4 GB to disk
+//
+// Checkpoints are written after each expensive step so that on a crash or
+// Ctrl-C the computation can resume without restarting from scratch:
+//   ckpt_collision.bin  — saved after step 1 (collision search)
+//   ckpt_linkmsg.bin    — saved after step 3 (linkmsg search)
+// Delete them to force a full restart.
+//
+// Memory budget (BLOCKSIZE=64):
+//   collision table   HASHSIZE(=2^30) × sizeof(cell)  ≈ 25 GB  (step 1)
+//   intermediate h    (2^28+2) × 8 bytes              ≈  2 GB  (step 2)
+//   linkmsg LUT       LUT_MAX_ENTRIES×4 × 12 bytes    ≈  0.75 GB (step 3)
+// You will need a machine with ≥ 28 GB RAM for step 1.
+// If your machine has less, reduce HASHSIZE in the Makefile for step 1.
 #else
 
+/* ------------------------------------------------------------------ *
+ *  Checkpoint helpers — tiny binary files, one per expensive step.   *
+ *  Format is fixed-size raw bytes; fields written in declaration      *
+ *  order with no padding (use only scalar types and byte arrays).    *
+ * ------------------------------------------------------------------ */
+
+#define CKPT_COLLISION "ckpt_collision.bin"
+#define CKPT_LINKMSG   "ckpt_linkmsg.bin"
+
+/* Step 1: ms[BLEN] | mf[BLEN] | hf[HLEN] | count(double) */
+static int save_collision(const byte *ms, const byte *mf, const byte *hf, double count)
+{
+    FILE *f = fopen(CKPT_COLLISION, "wb");
+    if (!f) { perror("save_collision: fopen"); return 0; }
+    int ok = (fwrite(ms,     1,             BLEN,   f) == (size_t)BLEN  &&
+              fwrite(mf,     1,             BLEN,   f) == (size_t)BLEN  &&
+              fwrite(hf,     1,             HLEN,   f) == (size_t)HLEN  &&
+              fwrite(&count, sizeof(double), 1,     f) == 1);
+    fclose(f);
+    if (ok) fprintf(stderr, "  checkpoint saved: %s\n", CKPT_COLLISION);
+    return ok;
+}
+
+static int load_collision(byte *ms, byte *mf, byte *hf, double *count)
+{
+    FILE *f = fopen(CKPT_COLLISION, "rb");
+    if (!f) return 0;
+    int ok = (fread(ms,     1,             BLEN,   f) == (size_t)BLEN  &&
+              fread(mf,     1,             BLEN,   f) == (size_t)BLEN  &&
+              fread(hf,     1,             HLEN,   f) == (size_t)HLEN  &&
+              fread(count,  sizeof(double), 1,     f) == 1);
+    fclose(f);
+    return ok;
+}
+
+/* Step 3: ml[BLEN] | link_idx(int) | count(double) */
+static int save_linkmsg(const byte *ml, int link_idx, double count)
+{
+    FILE *f = fopen(CKPT_LINKMSG, "wb");
+    if (!f) { perror("save_linkmsg: fopen"); return 0; }
+    int ok = (fwrite(ml,        1,             BLEN,   f) == (size_t)BLEN &&
+              fwrite(&link_idx, sizeof(int),    1,     f) == 1             &&
+              fwrite(&count,    sizeof(double), 1,     f) == 1);
+    fclose(f);
+    if (ok) fprintf(stderr, "  checkpoint saved: %s\n", CKPT_LINKMSG);
+    return ok;
+}
+
+static int load_linkmsg(byte *ml, int *link_idx, double *count)
+{
+    FILE *f = fopen(CKPT_LINKMSG, "rb");
+    if (!f) return 0;
+    int ok = (fread(ml,        1,             BLEN,   f) == (size_t)BLEN &&
+              fread(link_idx,  sizeof(int),    1,     f) == 1             &&
+              fread(count,     sizeof(double), 1,     f) == 1);
+    fclose(f);
+    return ok;
+}
+
+/* Helper: print BLEN bytes as a lowercase hex string (no spaces, no newline). */
 static void print_hex(const byte *buf, size_t n) {
     for (size_t i = 0; i < n; i++)
         printf("%02x", buf[i]);
@@ -169,119 +249,123 @@ static void print_hex(const byte *buf, size_t n) {
 
 int main(void) {
     fprintf(stderr, "BLOCKSIZE=64 attack on 0^{2^32}\n");
-    fprintf(stderr, "Target message: 2^32 zero bytes\n\n");
+    fprintf(stderr, "Target: 2^32 zero bytes | BLEN=%d HLEN=%d\n\n", BLEN, HLEN);
 
-    /* MSG_LEN = (size_t)1 << 32 — must use size_t to avoid 32-bit UB. */
-    const size_t len = (size_t)1 << 32;
+    const size_t len      = (size_t)1 << 32;      /* 4 GB — must not be plain int */
+    size_t nb_blocks      = (len + BLEN - 1) / BLEN;   /* = 2^28 */
 
-    /* ------------------------------------------------------------------ *
-     * Step 0 – allocate and zero-fill the target message.                *
-     * calloc gives zeroed memory, which is exactly our target: 0^{2^32}. *
-     * ------------------------------------------------------------------ */
-    fprintf(stderr, "Allocating target message (%.1f GB)...\n",
-            (double)len / (1ULL << 30));
-    byte *m = calloc(len, 1);
-    if (!m) { fprintf(stderr, "OOM allocating m\n"); return 1; }
+    byte   ms[BLEN], mf[BLEN], hf[HLEN];
+    byte   ml[BLEN];
+    int    link_idx = -1;
+    double count1 = 0.0, count3 = 0.0;
 
-    /* ------------------------------------------------------------------ *
-     * Step 1 – find fixed-point collision:                               *
-     *   h0 -[ms]-> hf  and  E^{-1}_{mf}(0) = hf                        *
-     * ------------------------------------------------------------------ */
-    fprintf(stderr, "Step 1: collision search...\n");
-    byte ms[BLEN], mf[BLEN], hf[HLEN];
-    double count = 0.0;
-    count += collision(ms, mf, hf);
-    fprintf(stderr, "  collision found using ~2^%.2f samples\n", log2(count));
+    /* ---------------------------------------------------------------- *
+     * Step 1 — collision: h0 -[ms]-> hf, E^{-1}_{mf}(0) = hf         *
+     * Checkpoint: ckpt_collision.bin                                   *
+     * ---------------------------------------------------------------- */
+    if (load_collision(ms, mf, hf, &count1)) {
+        fprintf(stderr, "[Step 1] Loaded from checkpoint %s  (~2^%.2f samples)\n",
+                CKPT_COLLISION, log2(count1));
+    } else {
+        fprintf(stderr, "[Step 1] Collision search (expect ~2^32 samples)...\n");
+        count1 = collision(ms, mf, hf);
+        fprintf(stderr, "  done: ~2^%.2f samples\n", log2(count1));
+        save_collision(ms, mf, hf, count1);
+    }
 
-    /* ------------------------------------------------------------------ *
-     * Step 2 – compute all intermediate digests of m.                   *
-     * ------------------------------------------------------------------ */
-    fprintf(stderr, "Step 2: computing intermediate digests (~2 GB)...\n");
-    size_t nb_blocks  = (len + BLEN - 1) / BLEN;   /* = 2^28 */
-    size_t nb_digests = nb_blocks + 2;
-    byte  *h          = calloc(nb_digests, HLEN);
-    if (!h) { fprintf(stderr, "OOM allocating digest array\n"); free(m); return 1; }
-    intermediate_digests(m, len, h);
+    /* ---------------------------------------------------------------- *
+     * Step 3 can be skipped entirely if its checkpoint already exists. *
+     * Step 2 (intermediate digests) is fast (~3 s) and not persisted. *
+     * ---------------------------------------------------------------- */
+    if (load_linkmsg(ml, &link_idx, &count3)) {
+        fprintf(stderr, "[Step 3] Loaded from checkpoint %s  (link_idx=%d, ~2^%.2f samples)\n",
+                CKPT_LINKMSG, link_idx, log2(count3));
+    } else {
+        /* ------------------------------------------------------------ *
+         * Step 2 — intermediate digests.                               *
+         * Recomputed each run (fast, and h would be another 2 GB file). *
+         * ------------------------------------------------------------ */
+        fprintf(stderr, "[Step 2] Computing intermediate digests (~2 GB)...\n");
+        byte *m = calloc(len, 1);   /* target message: 4 GB of zeros */
+        if (!m) { fprintf(stderr, "OOM allocating target message\n"); return 1; }
 
-    /* We no longer need the raw message bytes. */
-    free(m);  m = NULL;
+        size_t nb_digests = nb_blocks + 2;
+        byte  *h          = calloc(nb_digests, HLEN);
+        if (!h) { fprintf(stderr, "OOM allocating digest array\n"); free(m); return 1; }
 
-    /* ------------------------------------------------------------------ *
-     * Step 3 – find linking block ml such that f(hf, ml) = h[i].        *
-     * ------------------------------------------------------------------ */
-    fprintf(stderr, "Step 3: linkmsg search...\n");
-    byte ml[BLEN];
-    int  link_idx;
-    count += linkmsg(ml, &link_idx, hf, h, len);
-    fprintf(stderr, "  linkmsg found using ~2^%.2f samples (i=%d)\n",
-            log2(count), link_idx);
+        intermediate_digests(m, len, h);
+        free(m);   /* no longer needed */
+        fprintf(stderr, "  done.\n");
 
-    free(h);  h = NULL;
+        /* ------------------------------------------------------------ *
+         * Step 3 — linkmsg: hf -[ml]-> h[link_idx]                    *
+         * Checkpoint: ckpt_linkmsg.bin                                 *
+         * ------------------------------------------------------------ */
+        fprintf(stderr, "[Step 3] linkmsg search (LUT_MAX_ENTRIES=%zu, expect ~2^%.0f samples)...\n",
+                (size_t)LUT_MAX_ENTRIES,
+                64.0 - log2((double)LUT_MAX_ENTRIES));
+        count3 = linkmsg(ml, &link_idx, hf, h, len);
+        free(h);
+        fprintf(stderr, "  done: link_idx=%d  ~2^%.2f samples\n", link_idx, log2(count3));
+        save_linkmsg(ml, link_idx, count3);
+    }
 
-    /* ------------------------------------------------------------------ *
-     * Step 4 – compute k and suffix.                                     *
-     *                                                                     *
-     * m2 = ms || mf^k || ml || 0^suffix_zeros                           *
-     * k = link_idx - 2  (so total block count equals nb_blocks)         *
-     * suffix is zero bytes because m was all zeros.                      *
-     * ------------------------------------------------------------------ */
+    /* ---------------------------------------------------------------- *
+     * Step 4 — validate and compute m2 parameters.                    *
+     * m2 = ms || mf^k || ml || 0^suffix_zeros                         *
+     * ---------------------------------------------------------------- */
     if (link_idx < 2) {
-        fprintf(stderr, "Attack failed: link_idx=%d < 2\n", link_idx);
+        fprintf(stderr, "Attack failed: link_idx=%d < 2 (need i >= 2). "
+                        "Delete checkpoints and retry.\n", link_idx);
         return 1;
     }
 
-    /* Use long long / size_t to avoid overflow for large indices. */
-    long long  k            = (long long)link_idx - 2;
-    size_t     suffix_zeros = ((size_t)(nb_blocks - (size_t)link_idx)) * (size_t)BLEN;
-    size_t     total_bytes  = (size_t)BLEN              /* ms */
-                            + (size_t)k * (size_t)BLEN  /* mf^k */
-                            + (size_t)BLEN              /* ml */
-                            + suffix_zeros;             /* zeros */
+    long long k            = (long long)link_idx - 2;
+    size_t    suffix_zeros = ((size_t)(nb_blocks - (size_t)link_idx)) * (size_t)BLEN;
+    size_t    total_bytes  = (size_t)BLEN
+                           + (size_t)k * (size_t)BLEN
+                           + (size_t)BLEN
+                           + suffix_zeros;
 
-    fprintf(stderr, "\nParameters for m2:\n");
+    fprintf(stderr, "\n--- m2 parameters ---\n");
     fprintf(stderr, "  k            = %lld  (mf repetitions)\n", k);
-    fprintf(stderr, "  suffix_zeros = %zu bytes\n", suffix_zeros);
-    fprintf(stderr, "  total m2     = %zu bytes (should equal %zu)\n",
-            total_bytes, len);
-    fprintf(stderr, "\nPrinting Python generator script to stdout...\n");
+    fprintf(stderr, "  suffix_zeros = %zu bytes (all zeros from original msg)\n", suffix_zeros);
+    fprintf(stderr, "  total |m2|   = %zu bytes  (expected %zu)\n", total_bytes, len);
+    fprintf(stderr, "  total work   = ~2^%.2f compression calls\n", log2(count1 + count3));
+    fprintf(stderr, "\nWriting Python generator to stdout...\n");
 
-    /* ------------------------------------------------------------------ *
-     * Step 5 – emit the Python script.                                   *
-     *                                                                     *
-     * The script streams m2 to sys.stdout.buffer in memory-efficient     *
-     * chunks, never building the full multi-GB bytes object at once.     *
-     * ------------------------------------------------------------------ */
+    /* ---------------------------------------------------------------- *
+     * Step 5 — emit Python script that streams m2 to stdout.          *
+     *                                                                  *
+     * The script never builds the full multi-GB bytes object in RAM:   *
+     *  - mf^k is written in 64 KB chunks                              *
+     *  - the zero suffix is written in 64 KB bytearray slices         *
+     * ---------------------------------------------------------------- */
     printf("#!/usr/bin/env python3\n");
     printf("\"\"\"Generated by test_attack (BLOCKSIZE=64).\n");
     printf("\n");
-    printf("Outputs m2, a second preimage of 0^{2^32}, to stdout as raw bytes.\n");
+    printf("Streams m2, a second preimage of 0^{2^32}, to stdout as raw bytes.\n");
+    printf("  python3 gen_m2.py > m2.bin           # ~4 GB file\n");
+    printf("  python3 gen_m2.py | your_verifier    # pipe without touching disk\n");
     printf("\n");
-    printf("Usage:\n");
-    printf("    python3 gen_m2.py > m2.bin          # write ~4 GB to disk\n");
-    printf("    python3 gen_m2.py | sha256sum        # pipe anywhere\n");
-    printf("\n");
-    printf("m2 structure:  ms || mf^k || ml || 0^suffix_zeros\n");
-    printf("Total size:    %zu bytes\n", total_bytes);
-    printf("Attack used:  ~2^%.2f compression-function calls\n", log2(count));
+    printf("Structure: ms || mf^k || ml || 0^suffix_zeros\n");
+    printf("Total:     %zu bytes\n", total_bytes);
+    printf("Work:     ~2^%.2f compression calls\n", log2(count1 + count3));
     printf("\"\"\"\n");
     printf("import sys\n\n");
 
-    /* The three key blocks (hard-coded hex literals). */
     printf("ms           = bytes.fromhex('"); print_hex(ms, BLEN); printf("')\n");
     printf("mf           = bytes.fromhex('"); print_hex(mf, BLEN); printf("')\n");
     printf("ml           = bytes.fromhex('"); print_hex(ml, BLEN); printf("')\n");
     printf("k            = %lld\n", k);
-    printf("suffix_zeros = %zu\n", suffix_zeros);
-    printf("\n");
-    printf("out = sys.stdout.buffer\n\n");
+    printf("suffix_zeros = %zu\n\n", suffix_zeros);
 
-    /* ms */
+    printf("out = sys.stdout.buffer\n");
     printf("out.write(ms)\n\n");
 
-    /* mf^k — write in chunks of REPS_PER_CHUNK copies to stay memory-light. */
-    printf("# Write mf repeated k times in large chunks.\n");
+    printf("# mf repeated k times — written in 64 KB chunks to avoid a huge bytes object.\n");
     printf("if k > 0:\n");
-    printf("    REPS = max(1, 65536 // len(mf))  # ~4096 for BLEN=16\n");
+    printf("    REPS  = max(1, 65536 // len(mf))   # ~4096 copies per chunk for BLEN=16\n");
     printf("    chunk = mf * REPS\n");
     printf("    full, rem = divmod(k, REPS)\n");
     printf("    for _ in range(full):\n");
@@ -289,13 +373,11 @@ int main(void) {
     printf("    if rem:\n");
     printf("        out.write(mf * rem)\n\n");
 
-    /* ml */
     printf("out.write(ml)\n\n");
 
-    /* zero suffix — chunked so Python never builds a huge bytes object. */
-    printf("# Zero suffix (original message was all zeros).\n");
+    printf("# Suffix: all zeros (original message was 0^{2^32}).\n");
     printf("if suffix_zeros > 0:\n");
-    printf("    CHUNK = 1 << 16  # 64 KB\n");
+    printf("    CHUNK = 1 << 16\n");
     printf("    buf   = bytearray(CHUNK)\n");
     printf("    left  = suffix_zeros\n");
     printf("    while left > 0:\n");
@@ -305,4 +387,5 @@ int main(void) {
 
     return 0;
 }
+
 #endif
