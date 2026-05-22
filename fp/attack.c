@@ -1,5 +1,9 @@
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
+#ifdef _OPENMP
+#  include <omp.h>
+#endif
 #include "hash.h"
 #include "utils.h"
 #include "attack.h"
@@ -17,20 +21,64 @@ static lut_entry *build_lut(const byte *h, size_t nb_blocks, uint32_t *mask_out)
     size_t sz = 1;
     while (sz < nb_blocks * 4) sz <<= 1;   /* next power-of-2 for cheap & masking */
     *mask_out = (uint32_t)(sz - 1);
+    uint32_t mask = *mask_out;
 
     lut_entry *lut = malloc(sz * sizeof(lut_entry));
     if (!lut) return NULL;
-    for (size_t i = 0; i < sz; i++) lut[i].idx = -1;   /* mark all empty */
 
-    /* Insert h[1 .. nb_blocks-1]; skip h[0]=IV, matching linkmsg semantics. */
+    /* memset 0xFF: every int32_t idx field becomes 0xFFFFFFFF = -1 (empty).
+     * Digest bytes are irrelevant until a slot is claimed.             */
+    memset(lut, 0xFF, sz * sizeof(lut_entry));
+
+#ifdef _OPENMP
+    /*
+     * Parallel insertion with N_STRIPES coarse-grained locks.
+     * Each lock protects sz/N_STRIPES consecutive slots.
+     * N_STRIPES must be a power of 2 so we can mask instead of mod.
+     *
+     * Protocol for inserting entry j at slot s:
+     *   1. acquire lock for stripe(s)
+     *   2. if lut[s].idx == -1: write digest + idx, release, done
+     *   3. else: release, probe s+1, repeat
+     * Two threads can never both claim the same slot because the check
+     * and the write happen under the same lock.
+     */
+    enum { N_STRIPES = 4096 };
+    omp_lock_t locks[N_STRIPES];
+    for (int s = 0; s < N_STRIPES; s++) omp_init_lock(&locks[s]);
+
+    #pragma omp parallel for schedule(static)
     for (size_t j = 1; j < nb_blocks; j++) {
         const byte *d = h + j * HLEN;
-        uint32_t slot = HASH(d) & *mask_out;
-        while (lut[slot].idx != -1)         /* linear probe past occupied slots  */
-            slot = (slot + 1) & *mask_out;
+        uint32_t slot = HASH(d) & mask;
+        for (;;) {
+            int stripe = (int)(slot & (N_STRIPES - 1));
+            omp_set_lock(&locks[stripe]);
+            int was_empty = (lut[slot].idx == -1);
+            if (was_empty) {
+                memcpy(lut[slot].digest, d, HLEN);
+                lut[slot].idx = (int32_t)(j <= (size_t)INT32_MAX ? j : INT32_MAX);
+            }
+            omp_unset_lock(&locks[stripe]);
+            if (was_empty) break;
+            slot = (slot + 1) & mask;   /* occupied — linear probe to next slot */
+        }
+    }
+
+    for (int s = 0; s < N_STRIPES; s++) omp_destroy_lock(&locks[s]);
+
+#else
+    /* Sequential fallback (used by the non-OMP #else build). */
+    for (size_t j = 1; j < nb_blocks; j++) {
+        const byte *d = h + j * HLEN;
+        uint32_t slot = HASH(d) & mask;
+        while (lut[slot].idx != -1)
+            slot = (slot + 1) & mask;
         memcpy(lut[slot].digest, d, HLEN);
         lut[slot].idx = (int32_t)j;
     }
+#endif
+
     return lut;
 }
 
