@@ -1,107 +1,36 @@
 #include <string.h>
 #include <stdlib.h>
-#include <stdio.h>
-#ifdef _OPENMP
-#  include <omp.h>
-#endif
 #include "hash.h"
 #include "utils.h"
 #include "attack.h"
 
 
-/* ================================================================== *
- *  Lookup table for linkmsg: maps intermediate digest → block index  *
- *  Linear-probing open-addressing table; idx == -1 signals empty.    *
- * ================================================================== */
-typedef struct {
-    byte    digest[HLEN];
-    int32_t idx;
+// lookup table for linked-message stage
+
+typedef struct { 
+	byte digest[HLEN]; 
+	int32_t idx; 
 } lut_entry;
 
-/*
- * build_lut — populate the lookup table from intermediate digests.
- *
- * When nb_blocks > LUT_MAX_ENTRIES we can't fit every digest in the table.
- * Rather than taking only the first N blocks (which misses the tail of the
- * message entirely), we stride evenly through all blocks so coverage is
- * spread across the whole message.  The attack still works: linkmsg samples
- * random ml and checks against whatever subset is in the table; it simply
- * needs proportionally more samples when stride > 1.
- *
- * Parallel build (OMP): insertion uses N_STRIPES coarse-grained locks.
- * Each stripe protects 1/N_STRIPES of the table.  With low load factor
- * (~25%) probes rarely cross stripe boundaries and contention stays low.
- */
 static lut_entry *build_lut(const byte *h, size_t nb_blocks, uint32_t *mask_out)
 {
-    /* How many entries to insert and at what stride. */
-    size_t nb_insert = (nb_blocks <= LUT_MAX_ENTRIES) ? nb_blocks : LUT_MAX_ENTRIES;
-    size_t stride    = (nb_blocks + nb_insert - 1) / nb_insert;  /* >= 1 */
-
-    /* Table size: next power-of-2 >= 4 × nb_insert (~25% load factor). */
     size_t sz = 1;
-    while (sz < nb_insert * 4) sz <<= 1;
+    while (sz < nb_blocks * 4) sz <<= 1;   /* next power-of-2 for cheap & masking */
     *mask_out = (uint32_t)(sz - 1);
-    uint32_t mask = *mask_out;
 
     lut_entry *lut = malloc(sz * sizeof(lut_entry));
     if (!lut) return NULL;
+    for (size_t i = 0; i < sz; i++) lut[i].idx = -1;   /* mark all empty */
 
-    /* memset 0xFF → every int32_t idx field becomes 0xFFFFFFFF = -1 (empty).
-     * Digest bytes don't matter until the slot is claimed.               */
-    memset(lut, 0xFF, sz * sizeof(lut_entry));
-
-    fprintf(stderr, "  build_lut: %zu entries (stride=%zu), table=%zu slots, %.0f MB\n",
-            nb_insert, stride, sz,
-            (double)(sz * sizeof(lut_entry)) / (1 << 20));
-
-#ifdef _OPENMP
-    /*
-     * Parallel insertion with striped locks.
-     * N_STRIPES must be a power of 2 so we can mask instead of mod.
-     * 4096 stripes → each protects sz/4096 slots; contention is rare.
-     */
-    enum { N_STRIPES = 4096 };
-    omp_lock_t locks[N_STRIPES];
-    for (int s = 0; s < N_STRIPES; s++) omp_init_lock(&locks[s]);
-
-    #pragma omp parallel for schedule(static)
-    for (size_t k = 0; k < nb_insert; k++) {
-        size_t j = 2 + k * stride;   /* start from j=2 so link_idx-2 >= 0 */
-        if (j >= nb_blocks) continue;
+    /* Insert h[1 .. nb_blocks-1]; skip h[0]=IV, matching linkmsg semantics. */
+    for (size_t j = 1; j < nb_blocks; j++) {
         const byte *d = h + j * HLEN;
-        uint32_t slot = HASH(d) & mask;
-        for (;;) {
-            int s = (int)(slot & (N_STRIPES - 1));
-            omp_set_lock(&locks[s]);
-            int was_empty = (lut[slot].idx == -1);
-            if (was_empty) {
-                memcpy(lut[slot].digest, d, HLEN);
-                lut[slot].idx = (int32_t)(j <= (size_t)INT32_MAX ? j : INT32_MAX);
-            }
-            omp_unset_lock(&locks[s]);
-            if (was_empty) break;
-            slot = (slot + 1) & mask;   /* linear probe to next slot */
-        }
-    }
-
-    for (int s = 0; s < N_STRIPES; s++) omp_destroy_lock(&locks[s]);
-
-#else   /* sequential fallback */
-
-    for (size_t k = 0; k < nb_insert; k++) {
-        size_t j = 2 + k * stride;
-        if (j >= nb_blocks) continue;
-        const byte *d = h + j * HLEN;
-        uint32_t slot = HASH(d) & mask;
-        while (lut[slot].idx != -1)
-            slot = (slot + 1) & mask;
+        uint32_t slot = HASH(d) & *mask_out;
+        while (lut[slot].idx != -1)         /* linear probe past occupied slots  */
+            slot = (slot + 1) & *mask_out;
         memcpy(lut[slot].digest, d, HLEN);
-        lut[slot].idx = (int32_t)(j <= (size_t)INT32_MAX ? j : INT32_MAX);
+        lut[slot].idx = (int32_t)j;
     }
-
-#endif /* _OPENMP */
-
     return lut;
 }
 
