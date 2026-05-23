@@ -16,6 +16,27 @@ typedef struct {
 	int32_t idx; 
 } lut_entry;
 
+/*
+ * lut_hash — 32-bit hash of a digest for LUT slot computation.
+ *
+ * The HASH() macro in attack.h uses only 3 bytes (24-bit output).
+ * That is fine for the collision hash table whose size is capped at
+ * HASHSIZE ≤ 2^24.  But the linkmsg LUT for BLOCKSIZE=64 has
+ * sz = 2^30 slots: with a 24-bit hash every entry maps to the
+ * first 2^24 / 2^30 = 1.6% of the table, creating catastrophic
+ * probe chains that make insertion O(hours) instead of O(seconds).
+ *
+ * Using 4 bytes gives a 32-bit range, covering tables up to 2^32.
+ * All block sizes have HLEN >= 4, so d[3] is always a valid byte.
+ */
+static inline uint32_t lut_hash(const byte *d)
+{
+    return (uint32_t)d[0]
+         | ((uint32_t)d[1] <<  8)
+         | ((uint32_t)d[2] << 16)
+         | ((uint32_t)d[3] << 24);
+}
+
 static lut_entry *build_lut(const byte *h, size_t nb_blocks, uint32_t *mask_out)
 {
     size_t sz = 1;
@@ -50,7 +71,7 @@ static lut_entry *build_lut(const byte *h, size_t nb_blocks, uint32_t *mask_out)
     #pragma omp parallel for schedule(static)
     for (size_t j = 1; j < nb_blocks; j++) {
         const byte *d = h + j * HLEN;
-        uint32_t slot = HASH(d) & mask;
+        uint32_t slot = lut_hash(d) & mask;
 	//printf("step1 of build LUT iteration\n");
         for (;;) {
             int stripe = (int)(slot & (N_STRIPES - 1));
@@ -73,7 +94,7 @@ static lut_entry *build_lut(const byte *h, size_t nb_blocks, uint32_t *mask_out)
     /* Sequential fallback (used by the non-OMP #else build). */
     for (size_t j = 1; j < nb_blocks; j++) {
         const byte *d = h + j * HLEN;
-        uint32_t slot = HASH(d) & mask;
+        uint32_t slot = lut_hash(d) & mask;
         while (lut[slot].idx != -1)
             slot = (slot + 1) & mask;
         memcpy(lut[slot].digest, d, HLEN);
@@ -87,7 +108,7 @@ static lut_entry *build_lut(const byte *h, size_t nb_blocks, uint32_t *mask_out)
 /* Returns the stored block index for `digest`, or -1 if absent. */
 static inline int lut_lookup(const lut_entry *lut, uint32_t mask, const byte *digest)
 {
-    uint32_t slot = HASH(digest) & mask;
+    uint32_t slot = lut_hash(digest) & mask;
     while (lut[slot].idx != -1) {
         if (memcmp(lut[slot].digest, digest, HLEN) == 0)
             return lut[slot].idx;
