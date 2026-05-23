@@ -1,13 +1,43 @@
 /*
  * gpu_linkmsg.hip
  *
- * GPU implementation of linkmsg() using HIP (AMD + NVIDIA).
- * Ports speck_enc/dec and xoshiro256** from utils.c to __device__ functions.
- * collision() is intentionally left on the CPU (random hash table writes
- * are a poor fit for GPU memory access patterns).
+ * GPU implementation of linkmsg() for both AMD (HIP) and NVIDIA (CUDA).
+ *
+ * Key change from original:
+ *   The old kernel scanned all nb_blocks intermediate digests linearly
+ *   for every sampled ml block — O(nb_blocks) per sample.  For BLOCKSIZE=64,
+ *   that is 2^28 comparisons per sample: completely infeasible.
+ *
+ *   The new kernel mirrors the OMP implementation: a hash table (LUT) is
+ *   built on the CPU and transferred to device memory once.  Each GPU thread
+ *   then does an O(1) lookup per sample, the same as the OMP path in attack.c.
+ *
+ * CUDA / HIP compatibility:
+ *   Compile with hipcc for both targets (AMD and NVIDIA).
+ *   For nvcc directly, the shim below maps hip* → cuda* so the same
+ *   source compiles without modification:
+ *     nvcc -x cu -O3 -std=c++17 -DBLOCKSIZE=64 ... -c -o gpu_linkmsg.o gpu_linkmsg.hip
  */
 
-#include <hip/hip_runtime.h>
+/* ======================================================================
+ * HIP / CUDA compatibility shim
+ *
+ * hipcc targeting NVIDIA translates hip* → cuda* automatically.
+ * When compiling with nvcc directly, the macros below do the same job.
+ * All kernel syntax (__global__, __device__, <<<>>>...) is identical.
+ * ====================================================================== */
+#if defined(__NVCC__) || defined(__CUDACC__)
+#  include <cuda_runtime.h>
+#  define hipMalloc             cudaMalloc
+#  define hipFree               cudaFree
+#  define hipMemcpy             cudaMemcpy
+#  define hipMemset             cudaMemset
+#  define hipDeviceSynchronize  cudaDeviceSynchronize
+#  define hipMemcpyHostToDevice cudaMemcpyHostToDevice
+#  define hipMemcpyDeviceToHost cudaMemcpyDeviceToHost
+#else
+#  include <hip/hip_runtime.h>
+#endif
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -221,29 +251,101 @@ __device__ static void xo_random_bytes(uint8_t *buf, int n, xo_state *st)
 }
 
 /* ======================================================================
- * linkmsg kernel
+ * LUT — same design as attack.c's lut_entry / lut_hash / lut_lookup
+ *
+ * The LUT is built once on the CPU (build_lut_host) and copied to device
+ * memory.  All GPU threads share the read-only copy via the L2 cache.
+ * ====================================================================== */
+
+typedef struct {
+    uint8_t digest[HLEN];
+    int32_t idx;            /* -1 = empty slot */
+} lut_entry;
+
+/*
+ * 4-byte hash → 32-bit slot index.
+ * The HASH() macro in attack.h only uses 3 bytes (24-bit output), which
+ * causes every entry to cluster in the first 1.6% of a 2^30 table.
+ * Using 4 bytes covers table sizes up to 2^32 and gives uniform spread.
+ * All block sizes have HLEN >= 4 so d[3] is always a valid byte.
+ */
+__device__ static inline uint32_t d_lut_hash(const uint8_t *d)
+{
+    return (uint32_t)d[0]
+         | ((uint32_t)d[1] <<  8)
+         | ((uint32_t)d[2] << 16)
+         | ((uint32_t)d[3] << 24);
+}
+
+/* O(1) lookup: returns matching block index or -1 if not in table. */
+__device__ static int d_lut_lookup(const lut_entry * __restrict__ lut,
+                                    uint32_t mask, const uint8_t *digest)
+{
+    uint32_t slot = d_lut_hash(digest) & mask;
+    while (lut[slot].idx != -1) {
+        bool match = true;
+        for (int i = 0; i < HLEN; i++) {
+            if (lut[slot].digest[i] != digest[i]) { match = false; break; }
+        }
+        if (match) return lut[slot].idx;
+        slot = (slot + 1) & mask;   /* linear probe */
+    }
+    return -1;
+}
+
+/*
+ * CPU-side LUT build — sequential; mirrors the #else path of build_lut()
+ * in attack.c.  For large block sizes the OMP-parallel build in attack.c
+ * already ran before gpu_linkmsg is called, so this is just for the GPU
+ * copy; timing is dominated by the GPU search, not this build.
+ */
+static lut_entry *build_lut_host(const uint8_t *h, size_t nb_blocks,
+                                  uint32_t *mask_out)
+{
+    size_t sz = 1;
+    while (sz < nb_blocks * 4) sz <<= 1;   /* next power-of-2, ~25% load */
+    *mask_out = (uint32_t)(sz - 1);
+    uint32_t mask = *mask_out;
+
+    lut_entry *lut = (lut_entry *)malloc(sz * sizeof(lut_entry));
+    if (!lut) return NULL;
+    memset(lut, 0xFF, sz * sizeof(lut_entry));  /* all idx = -1 (empty) */
+
+    for (size_t j = 1; j < nb_blocks; j++) {
+        const uint8_t *d = h + j * HLEN;
+        uint32_t slot = ((uint32_t)d[0] | ((uint32_t)d[1] << 8)
+                       | ((uint32_t)d[2] << 16) | ((uint32_t)d[3] << 24))
+                       & mask;
+        while (lut[slot].idx != -1)
+            slot = (slot + 1) & mask;
+        memcpy(lut[slot].digest, d, HLEN);
+        lut[slot].idx = (int32_t)(j <= (size_t)INT32_MAX ? j : INT32_MAX);
+    }
+    return lut;
+}
+
+/* ======================================================================
+ * linkmsg kernel — O(1) LUT lookup per sample
  *
  * Each thread independently:
  *   1. samples a random ml block
- *   2. computes f(hf, ml)
- *   3. scans the read-only intermediate digest array
- *
- * First thread to find a match sets *found via atomicCAS and writes
- * the result. All other threads stop on the next iteration.
+ *   2. computes tmp = f(hf, ml) via Davies-Meyer
+ *   3. looks up tmp in the read-only LUT (O(1) average with 25% load)
+ *   4. on match: atomicCAS to claim the result slot, then exits
  * ====================================================================== */
 __global__ void linkmsg_kernel(
-    const uint8_t * __restrict__ hf,          /* fixed-point hash  [HLEN]        */
-    const uint8_t * __restrict__ h_digests,   /* intermediate hashes [nb*HLEN]   */
-    int              nb_blocks,               /* blocks in target message         */
-    uint64_t         host_seed,              /* entropy from /dev/urandom        */
-    uint8_t         *res_ml,                 /* output: winning ml [BLEN]        */
-    int             *res_ind,                /* output: matched digest index     */
-    int             *found,                  /* shared stop flag                 */
-    unsigned long long *total_count          /* total samples across all threads */
+    const uint8_t   * __restrict__ hf,       /* fixed-point hash  [HLEN]     */
+    const lut_entry * __restrict__ lut,       /* intermediate digest LUT      */
+    uint32_t          lut_mask,               /* sz-1 for power-of-2 masking  */
+    uint64_t          host_seed,              /* entropy from /dev/urandom    */
+    uint8_t          *res_ml,                 /* output: winning ml [BLEN]    */
+    int              *res_ind,                /* output: matched digest index */
+    int              *found,                  /* shared stop flag             */
+    unsigned long long *total_count           /* total samples (all threads)  */
 ) {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
 
-    /* Each thread gets a fully independent xoshiro256** stream */
+    /* Each thread gets a fully independent xoshiro256** stream. */
     xo_state rng = xo_seed(host_seed ^ (uint64_t)tid);
 
     uint8_t ml[BLEN], tmp[HLEN];
@@ -253,87 +355,103 @@ __global__ void linkmsg_kernel(
         xo_random_bytes(ml, BLEN, &rng);
         local_count++;
 
-        /* tmp = f(hf, ml) */
         for (int i = 0; i < HLEN; i++) tmp[i] = hf[i];
-        d_compression(tmp, ml);
+        d_compression(tmp, ml);             /* tmp = f(hf, ml) */
 
-        /* Scan intermediate digests — skip h[0] which is the IV */
-        for (int j = 1; j < nb_blocks; j++) {
-            bool match = true;
-            for (int b = 0; b < HLEN; b++) {
-                if (tmp[b] != h_digests[j * HLEN + b]) { match = false; break; }
-            }
-            if (match) {
-                /* Only the first thread to arrive writes the result */
-                if (atomicCAS(found, 0, 1) == 0) {
-                    for (int b = 0; b < BLEN; b++) res_ml[b] = ml[b];
-                    *res_ind = j;
-                }
-                goto done;
+        int hit = d_lut_lookup(lut, lut_mask, tmp);
+        if (hit >= 0) {
+            /* First thread to find a match wins. */
+            if (atomicCAS(found, 0, 1) == 0) {
+                for (int b = 0; b < BLEN; b++) res_ml[b] = ml[b];
+                *res_ind = hit;
             }
         }
     }
-done:
     atomicAdd(total_count, local_count);
 }
 
 /* ======================================================================
  * Host-side wrapper
  *
- * On your 780M (iGPU, unified memory) hipMalloc still works fine —
- * the driver places the allocation in the shared pool and the GPU
- * accesses it directly without a PCIe copy.
+ * Flow:
+ *   1. Build LUT on CPU (sequential; fast for BLOCKSIZE 32/48,
+ *      acceptable for 64 — GPU search time dominates anyway).
+ *   2. Transfer LUT to device memory.
+ *   3. Launch kernel; threads do O(1) lookups per sample.
+ *   4. Retrieve result and clean up.
+ *
+ * On unified-memory GPUs (e.g. AMD 780M, Intel Arc) hipMalloc places
+ * the allocation in the shared pool; no explicit PCIe copy occurs.
+ * On discrete GPUs the hipMemcpy is a one-time cost that is tiny
+ * compared to the search time.
  * ====================================================================== */
 extern "C"
 double gpu_linkmsg(uint8_t *ml, int *ind,
                    const uint8_t *hf, const uint8_t *h, size_t len)
 {
-    size_t nb_blocks  = (len + BLEN - 1) / BLEN;
-    size_t nb_digests = nb_blocks + 2;   /* IV + message blocks + length block */
+    size_t nb_blocks = (len + BLEN - 1) / BLEN;
 
-    /* --- device allocations ------------------------------------------ */
-    uint8_t            *d_hf, *d_h, *d_ml;
+    /* --- Build LUT on CPU -------------------------------------------- */
+    fprintf(stderr, "  GPU: building LUT (%zu blocks)...\n", nb_blocks);
+    uint32_t lut_mask;
+    lut_entry *h_lut = build_lut_host(h, nb_blocks, &lut_mask);
+    if (!h_lut) { fprintf(stderr, "  GPU: OOM building LUT\n"); return 0.0; }
+
+    size_t lut_sz    = (size_t)lut_mask + 1;
+    size_t lut_bytes = lut_sz * sizeof(lut_entry);
+    fprintf(stderr, "  GPU: LUT %.0f MB (%zu slots at 25%% load)\n",
+            (double)lut_bytes / (1 << 20), lut_sz);
+
+    /* --- Device allocations ------------------------------------------ */
+    uint8_t            *d_hf;
+    lut_entry          *d_lut;
+    uint8_t            *d_ml;
     int                *d_ind, *d_found;
     unsigned long long *d_count;
 
     hipMalloc(&d_hf,    HLEN);
-    hipMalloc(&d_h,     nb_digests * HLEN);
+    hipMalloc(&d_lut,   lut_bytes);
     hipMalloc(&d_ml,    BLEN);
     hipMalloc(&d_ind,   sizeof(int));
     hipMalloc(&d_found, sizeof(int));
     hipMalloc(&d_count, sizeof(unsigned long long));
 
-    hipMemcpy(d_hf, hf, HLEN,              hipMemcpyHostToDevice);
-    hipMemcpy(d_h,  h,  nb_digests * HLEN, hipMemcpyHostToDevice);
+    hipMemcpy(d_hf,  hf,    HLEN,       hipMemcpyHostToDevice);
+    hipMemcpy(d_lut, h_lut, lut_bytes,  hipMemcpyHostToDevice);
     hipMemset(d_found, 0, sizeof(int));
     hipMemset(d_count, 0, sizeof(unsigned long long));
+    free(h_lut);   /* device has its own copy now */
 
-    /* --- seed from /dev/urandom --------------------------------------- */
+    /* --- Seed from /dev/urandom --------------------------------------- */
     uint64_t seed = 0xdeadbeefcafeULL;
-    FILE *f = fopen("/dev/urandom", "rb");
-    if (f) { fread(&seed, sizeof(seed), 1, f); fclose(f); }
+    FILE *fp = fopen("/dev/urandom", "rb");
+    if (fp) { fread(&seed, sizeof(seed), 1, fp); fclose(fp); }
 
-    /* --- launch: 780M has 12 CUs, 64 threads/wavefront -------------- */
-    /* 128 blocks × 256 threads = 32 768 concurrent work items          */
+    /* --- Launch ------------------------------------------------------- */
+    /* 128 blocks × 256 threads = 32 768 concurrent work items.
+     * For discrete GPUs with many SMs, increase blocks (e.g. 512×256). */
     dim3 threads(256);
     dim3 blocks(128);
+    fprintf(stderr, "  GPU: launching %u×%u threads...\n",
+            blocks.x, threads.x);
 
     linkmsg_kernel<<<blocks, threads>>>(
-        d_hf, d_h, (int)nb_blocks, seed,
+        d_hf, d_lut, lut_mask, seed,
         d_ml, d_ind, d_found, d_count);
 
     hipDeviceSynchronize();
+    fprintf(stderr, "  GPU: kernel finished\n");
 
-    /* --- retrieve results --------------------------------------------- */
-    hipMemcpy(ml,  d_ml,  BLEN,       hipMemcpyDeviceToHost);
-    hipMemcpy(ind, d_ind, sizeof(int), hipMemcpyDeviceToHost);
+    /* --- Retrieve results --------------------------------------------- */
+    hipMemcpy(ml,  d_ml,   BLEN,        hipMemcpyDeviceToHost);
+    hipMemcpy(ind, d_ind,  sizeof(int), hipMemcpyDeviceToHost);
 
     unsigned long long count = 0;
     hipMemcpy(&count, d_count, sizeof(count), hipMemcpyDeviceToHost);
 
-    /* --- cleanup ------------------------------------------------------ */
-    hipFree(d_hf); hipFree(d_h);    hipFree(d_ml);
-    hipFree(d_ind); hipFree(d_found); hipFree(d_count);
+    /* --- Cleanup ------------------------------------------------------ */
+    hipFree(d_hf);   hipFree(d_lut);   hipFree(d_ml);
+    hipFree(d_ind);  hipFree(d_found); hipFree(d_count);
 
     return (double)count;
 }

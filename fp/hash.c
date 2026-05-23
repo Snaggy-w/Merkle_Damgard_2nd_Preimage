@@ -3,6 +3,25 @@
 #include "hash.h"
 #include "utils.h"
 
+
+
+
+#if BLOCKSIZE == 48
+
+#define IV 0x050403020100
+
+#elif BLOCKSIZE == 64
+
+#define IV 0x0706050403020100
+
+#else
+
+#define IV 0x03020100
+
+#endif
+
+
+
 // in util.c 
 // 	for BLOCKSIZE = {32,48,64}
 // HLEN = MLEN = {4,6,8}

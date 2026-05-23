@@ -4,6 +4,24 @@
 #include "hash.h"
 #include "utils.h"
 
+
+
+#if BLOCKSIZE == 48
+
+#define IV 0x050403020100
+
+#elif BLOCKSIZE == 64
+
+#define IV 0x0706050403020100
+
+#else
+
+#define IV 0x03020100
+
+#endif
+
+
+
 // SPECK_M: message to use for speck test
 // HASH_M2 and HASH_M3: the second and third messages to test hashing with
 

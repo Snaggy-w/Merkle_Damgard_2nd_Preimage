@@ -1,85 +1,17 @@
-CC        = clang
-BLOCKSIZE = 32
-LDLIBS    = -lm
+# DO NOT CHANGE THIS FILE
 
-# HASHSIZE scaled to block size so the table doesn't saturate
-# before the birthday bound is reached
-#>>> 1 << 28
-#268435456
-#>>> 1 << 30
-#1073741824
-#>>> 1 << 24
-#16777216
-
-ifeq ($(BLOCKSIZE),48)
-  HASHSIZE = 268435456    # 1<<28
-else ifeq ($(BLOCKSIZE),64)
-  HASHSIZE = 1073741824   # 1<<30
-else
-  HASHSIZE = 16777216     # 1<<24
-endif
-
-CFLAGS = -O3 -march=native -std=c11 -DBLOCKSIZE=$(BLOCKSIZE) -DHASHSIZE=$(HASHSIZE)
-
-ifeq ($(USE_OMP),1)
-  CFLAGS += -fopenmp
-endif
-
-ifeq ($(USE_HIP),1)
-  CFLAGS  += -DUSE_HIP
-endif
+CC=clang
+BLOCKSIZE=32
+CFLAGS=-O3 -march=native -DBLOCKSIZE=$(BLOCKSIZE)
+LDLIBS=-lm
 
 default:
-	@echo "Usage: make [test_speck|test_hash|test_attack] BLOCKSIZE=[32|48|64] [USE_OMP=1] [USE_HIP=1]"
-	@$(MAKE) all
+	@echo "Usage: make [test_speck|test_hash|test_attack] BLOCKSIZE=[32|48|64]"
 
-all: test_speck test_hash test_attack verify_attack
+all: test_speck test_hash test_attack
 
 test_speck: test_speck.c utils.c
-	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
 
 test_hash: test_hash.c utils.c hash.c
-	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
-
-# Verify the 64-bit second-preimage attack.
-# Always compiled with BLOCKSIZE=64 regardless of the default.
-# Usage:
-#   python3 construct_attack_message.py | ./verify_attack   (pipe m2)
-#   ./verify_attack m2.bin                                  (from file)
-verify_attack: verify_attack.c utils.c hash.c
-	$(CC) $(filter-out -DBLOCKSIZE=$(BLOCKSIZE), $(CFLAGS)) \
-	      -DBLOCKSIZE=64 -o $@ $^ $(LDLIBS)
-
-# HIP path: compile gpu_linkmsg.hip separately with hipcc, link together
-ifeq ($(USE_HIP),1)
-gpu_linkmsg.o: gpu_linkmsg.hip
-	hipcc -O3 -std=c++17 -DBLOCKSIZE=$(BLOCKSIZE) -DHASHSIZE=$(HASHSIZE) -c -o $@ $ $<
-
-test_attack.o: test_attack.c
-	$(CC) $(CFLAGS) -c -o $@ $ $<
-
-utils.o: utils.c
-	$(CC) $(CFLAGS) -c -o $@ $ $<
-
-hash.o: hash.c
-	$(CC) $(CFLAGS) -c -o $@ $ $<
-
-attack.o: attack.c
-	$(CC) $(CFLAGS) -c -o $@ $ $<
-
-test_attack: test_attack.o utils.o hash.o attack.o gpu_linkmsg.o
-	hipcc -o $@ $^ $(LDLIBS) -fopenmp -L/usr/lib/llvm-18/lib
-else
 
 test_attack: test_attack.c utils.c hash.c attack.c
-	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
-
-endif
-
-# writing inline bash in Makee is actually epic ngl...
-clean:
-	@for file in test_speck test_hash test_attack verify_attack \
-	             test_attack.o utils.o hash.o attack.o gpu_linkmsg.o; do \
-		if [ -f $$file ]; then rm $$file; echo "removed $$file"; \
-		else echo "$$file not found, skipping..."; fi \
-	done

@@ -9,26 +9,45 @@
 #include "attack.h"
 
 
+
+#if BLOCKSIZE == 48
+
+#define IV 0x050403020100
+
+#elif BLOCKSIZE == 64
+
+#define IV 0x0706050403020100
+
+#else
+
+#define IV 0x03020100
+
+#endif
+
+
+// To get around file protection restrictions we will redefine the macros here
+
+
+#ifndef HASHSIZE
+#define HASHSIZE (1<<24) // hashtable size (2^24): 3 bytes to represent the index in hashtable
+#endif
+
+#if BLOCKSIZE == 64
+#define HASHSIZE (1<<30)
+#elif BLOCKSIZE == 48
+#define HASHSIZE (1<<28)
+#endif
+
 // lookup table for linked-message stage
 
+// entry in the table like done in HASH table
 typedef struct { 
 	byte digest[HLEN]; 
 	int32_t idx; 
 } lut_entry;
 
-/*
- * lut_hash — 32-bit hash of a digest for LUT slot computation.
- *
- * The HASH() macro in attack.h uses only 3 bytes (24-bit output).
- * That is fine for the collision hash table whose size is capped at
- * HASHSIZE ≤ 2^24.  But the linkmsg LUT for BLOCKSIZE=64 has
- * sz = 2^30 slots: with a 24-bit hash every entry maps to the
- * first 2^24 / 2^30 = 1.6% of the table, creating catastrophic
- * probe chains that make insertion O(hours) instead of O(seconds).
- *
- * Using 4 bytes gives a 32-bit range, covering tables up to 2^32.
- * All block sizes have HLEN >= 4, so d[3] is always a valid byte.
- */
+// convert a digest into a table index with 4 bytes instead of 3 (mostly needed for 64 bit block size as the 3 byte indexing causes entries to clash a lot
+// and do not cover the birthday bound of 64 bits)
 static inline uint32_t lut_hash(const byte *d)
 {
     return (uint32_t)d[0]
@@ -37,20 +56,23 @@ static inline uint32_t lut_hash(const byte *d)
          | ((uint32_t)d[3] << 24);
 }
 
+// construction of the lookup table
 static lut_entry *build_lut(const byte *h, size_t nb_blocks, uint32_t *mask_out)
 {
+    // increase the table size by at least 4 times the number of entries initially
+    // Lookups will be very slow when the table is almost full, so making it larger by factor of powers of 2 will make much cheaper
+    // when doing lookups with bitwise AND on masks
     size_t sz = 1;
-    while (sz < nb_blocks * 4) sz <<= 1;   /* next power-of-2 for cheap & masking */
+    while (sz < nb_blocks * 4) sz <<= 1;   // next power-of-2 for cheap bitwise AND masking
     *mask_out = (uint32_t)(sz - 1);
     uint32_t mask = *mask_out;
 
     lut_entry *lut = malloc(sz * sizeof(lut_entry));
     if (!lut) return NULL;
-
-    /* memset 0xFF: every int32_t idx field becomes 0xFFFFFFFF = -1 (empty).
-     * Digest bytes are irrelevant until a slot is claimed.             */
+    // set every index to -1 by setting each byte to 0xFF -> -1 
     memset(lut, 0xFF, sz * sizeof(lut_entry));
 
+// This part was optimized and debugged by AI to make it much faster as it was very resource heavy
 #ifdef _OPENMP
     /*
      * Parallel insertion with N_STRIPES coarse-grained locks.
@@ -91,13 +113,13 @@ static lut_entry *build_lut(const byte *h, size_t nb_blocks, uint32_t *mask_out)
     for (int s = 0; s < N_STRIPES; s++) omp_destroy_lock(&locks[s]);
 
 #else
-    /* Sequential fallback (used by the non-OMP #else build). */
+    //sequential fallback (used by the non-OMP #else build)
     for (size_t j = 1; j < nb_blocks; j++) {
-        const byte *d = h + j * HLEN;
-        uint32_t slot = lut_hash(d) & mask;
-        while (lut[slot].idx != -1)
-            slot = (slot + 1) & mask;
-        memcpy(lut[slot].digest, d, HLEN);
+        const byte *d = h + j * HLEN; // get intermediate digest
+        uint32_t slot = lut_hash(d) & mask; // get a convinient slot
+        while (lut[slot].idx != -1) // if the slot is taken, walk one block at a time forward until an unoccupied slot is found
+            slot = (slot + 1) & mask; // the AND operator insures we wrap around the table so we don't go out of bounds and remain in the table
+        memcpy(lut[slot].digest, d, HLEN); // write the digest and the index
         lut[slot].idx = (int32_t)j;
     }
 #endif
@@ -105,28 +127,32 @@ static lut_entry *build_lut(const byte *h, size_t nb_blocks, uint32_t *mask_out)
     return lut;
 }
 
-/* Returns the stored block index for `digest`, or -1 if absent. */
+// table entry query function
 static inline int lut_lookup(const lut_entry *lut, uint32_t mask, const byte *digest)
 {
+    // get the slot
     uint32_t slot = lut_hash(digest) & mask;
-    while (lut[slot].idx != -1) {
-        if (memcmp(lut[slot].digest, digest, HLEN) == 0)
+    while (lut[slot].idx != -1) { // probe forward if the idx is not set to -1
+        if (memcmp(lut[slot].digest, digest, HLEN) == 0) // if the digest matches -> entry found
             return lut[slot].idx;
-        slot = (slot + 1) & mask;
+        slot = (slot + 1) & mask; // if it doesn't match, like the prevous function we probe forward until we find the match
     }
-    return -1;
+    return -1; // finished probing forward and found nothing => the entry doesn't exist in the LUT
 }
 
 
 // 3 versions: 
 // 	- the original (at the very bottom in the else block), sequential
 // 	- OMP accelerated version 
-//	- GPU accelerated version with HIP which should work on both AMD HIP and nvidia CUDA
+//	- GPU accelerated version with HIP which should work on both AMD HIP and nvidia CUDA (incomplete and not tested)
 
 
+
+// This version is fully generated by AI as we don't know how to do GPU programming (only wanted to see the performance difference)
 #ifdef USE_HIP
 #include <stdint.h>
 #include <stdatomic.h>
+
 
 /* Declared in gpu_linkmsg.hip, compiled separately by hipcc */
 extern double gpu_linkmsg(uint8_t *ml, int *ind, const uint8_t *hf, const uint8_t *h, size_t len);
@@ -271,170 +297,7 @@ double attack(const byte *m, size_t len, byte *m2) {
 #elif defined(_OPENMP)
 #include <stdatomic.h>
 
-/*
-double collision(byte ms[BLEN], byte mf[BLEN], byte hf[HLEN]) {
-
-    hash_tbl tbl = calloc(HASHSIZE, sizeof(cell));
-
-    byte h0[HLEN];
-    for (int i = 0; i < HLEN; i++)
-        h0[i] = (IV >> (i * 8)) & 0xFF;
-
-    byte zero[HLEN] = {0};
-
-    volatile atomic_int found = 0;
-    byte   res_ms[BLEN], res_mf[BLEN], res_hf[HLEN];
-    atomic_llong total_count = 0;
-
-    #pragma omp parallel shared(tbl, found, total_count, res_ms, res_mf, res_hf)
-    {
-        byte block[BLEN], tmp[HLEN];
-        long long local_count = 0;
-
-        while (!atomic_load_explicit(&found, memory_order_relaxed)) {
-
-            random_bytes(block, BLEN);
-            local_count++;
-
-            memcpy(tmp, h0, HLEN);
-            compression(tmp, block);
-
-            uint32_t idx = HASH(tmp) % HASHSIZE;
-
-            if (tbl[idx].side == -1 && memcmp(tmp, tbl[idx].h, HLEN) == 0) {
-                int expected = 0;
-                if (atomic_compare_exchange_strong(&found, &expected, 1)) {
-                    memcpy(res_ms, block,         BLEN);
-                    memcpy(res_mf, tbl[idx].m,    BLEN);
-                    memcpy(res_hf, tmp,           HLEN);
-                }
-            } else if (tbl[idx].side == 0) {
-                memcpy(tbl[idx].h, tmp,   HLEN);
-                memcpy(tbl[idx].m, block, BLEN);
-                tbl[idx].side = 1;
-            }
-
-            if (atomic_load_explicit(&found, memory_order_relaxed)) break;
-
-            random_bytes(block, BLEN);
-            local_count++;
-
-            speck_dec(block, tmp, zero);
-
-            idx = HASH(tmp) % HASHSIZE;
-
-            if (tbl[idx].side == 1 && memcmp(tmp, tbl[idx].h, HLEN) == 0) {
-                int expected = 0;
-                if (atomic_compare_exchange_strong(&found, &expected, 1)) {
-                    memcpy(res_ms, tbl[idx].m, BLEN);
-                    memcpy(res_mf, block,      BLEN);
-                    memcpy(res_hf, tmp,        HLEN);
-                }
-            } else if (tbl[idx].side == 0) {
-                memcpy(tbl[idx].h, tmp,   HLEN);
-                memcpy(tbl[idx].m, block, BLEN);
-                tbl[idx].side = -1;
-            }
-        }
-
-        atomic_fetch_add(&total_count, local_count);
-    }
-
-    memcpy(ms, res_ms, BLEN);
-    memcpy(mf, res_mf, BLEN);
-    memcpy(hf, res_hf, HLEN);
-
-    free(tbl);
-    return (double)atomic_load(&total_count);
-}
-
-
-double linkmsg(byte ml[BLEN], int *ind,
-               const byte hf[HLEN], const byte *h, size_t len)
-{
-    size_t nb_blocks = (len + BLEN - 1) / BLEN;
-
-    uint32_t lut_mask;
-    lut_entry *lut = build_lut(h, nb_blocks, &lut_mask);
-    if (!lut) {
-        fprintf(stderr, "linkmsg: out of memory building LUT\n");
-        *ind = -1;
-        return 0.0;
-    }
-
-    volatile atomic_int found = 0;
-    byte     res_ml[BLEN];
-    int      res_ind = -1;
-    atomic_llong total_count = 0;
-
-    #pragma omp parallel shared(found, total_count, res_ml, res_ind)
-    {
-        byte local_ml[BLEN], tmp[HLEN];
-        long long local_count = 0;
-
-        while (!atomic_load_explicit(&found, memory_order_relaxed)) {
-            random_bytes(local_ml, BLEN);
-            local_count++;
-
-            memcpy(tmp, hf, HLEN);
-            compression(tmp, local_ml); 
-
-            int hit = lut_lookup(lut, lut_mask, tmp);
-            if (hit >= 0) {
-                int expected = 0;
-                if (atomic_compare_exchange_strong(&found, &expected, 1)) {
-                    memcpy(res_ml, local_ml, BLEN);
-                    res_ind = hit;
-                }
-            }
-        }
-
-        atomic_fetch_add(&total_count, local_count);
-    }
-
-    free(lut);
-    memcpy(ml, res_ml, BLEN);
-    *ind = res_ind;
-    return (double)atomic_load(&total_count);
-}
-
-double attack(const byte *m, size_t len, byte *m2) {
-    double count = 0;
-
-    byte ms[BLEN], mf[BLEN], hf[HLEN];
-    count += collision(ms, mf, hf);
-
-    size_t nb_blocks  = (len + BLEN - 1) / BLEN;
-    size_t nb_digests = nb_blocks + 2;
-    byte  *h          = calloc(nb_digests * HLEN, 1);
-    intermediate_digests(m, len, h);
-
-    byte ml[BLEN];
-    int  i;
-    count += linkmsg(ml, &i, hf, h, len);
-
-    int k = i - 2;
-    if (k < 0) {
-        fprintf(stderr, "attack failed: i=%d too small, need i >= 2\n", i);
-        free(h);
-        return count;
-    }
-
-    size_t suffix_len = (nb_blocks - i) * BLEN;
-    size_t offset     = 0;
-
-    memcpy(m2 + offset, ms, BLEN);  offset += BLEN;
-    for (int j = 0; j < k; j++) {
-        memcpy(m2 + offset, mf, BLEN);  offset += BLEN;
-    }
-    memcpy(m2 + offset, ml, BLEN);  offset += BLEN;
-    memcpy(m2 + offset, m + i * BLEN, suffix_len);
-
-    free(h);
-    return count;
-}
-*/
-
+// thread safe
 static inline uint64_t tl_next(uint64_t *s) {
     uint64_t x = *s;
     x ^= x << 13;
@@ -442,7 +305,8 @@ static inline uint64_t tl_next(uint64_t *s) {
     x ^= x << 17;
     return *s = x;
 }
- 
+
+// reimplementation of random bytes to adapt to OpenMP threading
 static inline void tl_random_bytes(byte *buf, int n, uint64_t *s) {
     int i = 0;
     while (i < n) {
@@ -454,10 +318,7 @@ static inline void tl_random_bytes(byte *buf, int n, uint64_t *s) {
     }
 }
  
-/*
- * Step 1 — collision()
- * h0 -[ms]-> hf -[mf]-> hf (fixed point via Davies-Meyer)
- */
+// Step 1: Collision step with paralellized loop
 double collision(byte ms[BLEN], byte mf[BLEN], byte hf[HLEN]) {
  
     hash_tbl tbl = calloc(HASHSIZE, sizeof(cell));
@@ -471,7 +332,8 @@ double collision(byte ms[BLEN], byte mf[BLEN], byte hf[HLEN]) {
     volatile atomic_int found = 0;
     byte res_ms[BLEN], res_mf[BLEN], res_hf[HLEN];
     atomic_llong total_count = 0;
- 
+
+    // loop edited by AI to make it completely thread safe 
     #pragma omp parallel shared(tbl, found, total_count, res_ms, res_mf, res_hf)
     {
         /* Seed per-thread RNG from the global one — critical so threads
@@ -539,6 +401,7 @@ double collision(byte ms[BLEN], byte mf[BLEN], byte hf[HLEN]) {
         atomic_fetch_add(&total_count, local_count);
     }
  
+    // free resources (next step will require a LOT of memory in case of 64 bit block size)
     memcpy(ms, res_ms, BLEN);
     memcpy(mf, res_mf, BLEN);
     memcpy(hf, res_hf, HLEN);
@@ -547,16 +410,13 @@ double collision(byte ms[BLEN], byte mf[BLEN], byte hf[HLEN]) {
     return (double)atomic_load(&total_count);
 }
  
-/*
- * Step 2 — linkmsg()
- * hf -[ml]-> h[i]  (link fixed point into the target message chain)
- */
+// Step 2: Link message step
 double linkmsg(byte ml[BLEN], int *ind,
                const byte hf[HLEN], const byte *h, size_t len)
 {
     size_t nb_blocks = (len + BLEN - 1) / BLEN;
 
-    /* Build LUT once before spawning threads — read-only inside parallel region */
+    // Build LUT once before spawning threads
     uint32_t lut_mask;
     lut_entry *lut = build_lut(h, nb_blocks, &lut_mask);
     if (!lut) {
@@ -570,6 +430,7 @@ double linkmsg(byte ml[BLEN], int *ind,
     int  res_ind = -1;
     atomic_llong total_count = 0;
  
+    // Main section modified by AI to make it more thread safe
     #pragma omp parallel shared(lut, lut_mask, found, total_count, res_ml, res_ind)
     {
         uint64_t tl_rng;
@@ -611,10 +472,7 @@ double linkmsg(byte ml[BLEN], int *ind,
     return (double)atomic_load(&total_count);
 }
  
-/*
- * Step 3 — attack()
- * h0 -[ms]-> hf -[mf]^k -> hf -[ml]-> h[i] -[m[i..t-1]]-> h[t] -[|m|]-> H(m)
- */
+// Step 3: actual attack
 double attack(const byte *m, size_t len, byte *m2) {
     double count = 0;
  
