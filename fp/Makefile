@@ -33,13 +33,22 @@ default:
 	@echo "Usage: make [test_speck|test_hash|test_attack] BLOCKSIZE=[32|48|64] [USE_OMP=1] [USE_HIP=1]"
 	@$(MAKE) all
 
-all: test_speck test_hash test_attack
+all: test_speck test_hash test_attack verify_attack
 
 test_speck: test_speck.c utils.c
 	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
 
 test_hash: test_hash.c utils.c hash.c
 	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
+
+# Verify the 64-bit second-preimage attack.
+# Always compiled with BLOCKSIZE=64 regardless of the default.
+# Usage:
+#   python3 construct_attack_message.py | ./verify_attack   (pipe m2)
+#   ./verify_attack m2.bin                                  (from file)
+verify_attack: verify_attack.c utils.c hash.c
+	$(CC) $(filter-out -DBLOCKSIZE=$(BLOCKSIZE), $(CFLAGS)) \
+	      -DBLOCKSIZE=64 -o $@ $^ $(LDLIBS)
 
 # HIP path: compile gpu_linkmsg.hip separately with hipcc, link together
 ifeq ($(USE_HIP),1)
@@ -69,7 +78,7 @@ endif
 
 # writing inline bash in Makee is actually epic ngl...
 clean:
-	@for file in test_speck test_hash test_attack \
+	@for file in test_speck test_hash test_attack verify_attack \
 	             test_attack.o utils.o hash.o attack.o gpu_linkmsg.o; do \
 		if [ -f $$file ]; then rm $$file; echo "removed $$file"; \
 		else echo "$$file not found, skipping..."; fi \
