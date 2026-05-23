@@ -1,0 +1,245 @@
+time ./test_attack
+BLOCKSIZE=64 attack on 0^{2^32}
+Target message: 2^32 zero bytes
+
+Allocating target message (4.0 GB)...
+Step 1: loaded from ckpt_collision.bin (~2^39.23 samples)
+Step 2: computing intermediate digests (~2 GB)...
+Step 3: linkmsg search...
+step1 of build LUT
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+time ./test_attack
+BLOCKSIZE=64 attack on 0^{2^32}
+Target message: 2^32 zero bytes
+
+Allocating target message (4.0 GB)...
+Step 1: loaded from ckpt_collision.bin (~2^39.23 samples)
+Step 2: computing intermediate digests (~2 GB)...
+Step 3: linkmsg search...
+step1 of build LUT
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+time ./test_attack
+BLOCKSIZE=64 attack on 0^{2^32}
+Target message: 2^32 zero bytes
+
+Allocating target message (4.0 GB)...
+Step 1: loaded from ckpt_collision.bin (~2^39.23 samples)
+Step 2: computing intermediate digests (~2 GB)...
+Step 3: linkmsg search...
+step1 of build LUT
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+time ./test_attack
+BLOCKSIZE=64 attack on 0^{2^32}
+Target message: 2^32 zero bytes
+
+Allocating target message (4.0 GB)...
+Step 1: loaded from ckpt_collision.bin (~2^39.23 samples)
+Step 2: computing intermediate digests (~2 GB)...
+Step 3: linkmsg search...
+step1 of build LUT
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+time ./test_attack
+BLOCKSIZE=64 attack on 0^{2^32}
+Target message: 2^32 zero bytes
+
+Allocating target message (4.0 GB)...
+Step 1: loaded from ckpt_collision.bin (~2^39.23 samples)
+Step 2: computing intermediate digests (~2 GB)...
+Step 3: linkmsg search...
+step1 of build LUT
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+time ./test_attack
+BLOCKSIZE=64 attack on 0^{2^32}
+Target message: 2^32 zero bytes
+
+Allocating target message (4.0 GB)...
+Step 1: loaded from ckpt_collision.bin (~2^39.23 samples)
+Step 2: computing intermediate digests (~2 GB)...
+Step 3: linkmsg search...
+step1 of build LUT
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+time ./test_attack
+BLOCKSIZE=64 attack on 0^{2^32}
+Target message: 2^32 zero bytes
+
+Allocating target message (4.0 GB)...
+Step 1: loaded from ckpt_collision.bin (~2^39.23 samples)
+Step 2: computing intermediate digests (~2 GB)...
+Step 3: linkmsg search...
+step1 of build LUT
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+step1 of build LUT iteration
+step1 of build LUT finshed
+step1 of build LUT iteration
+...
+
+
+time ./test_attack
+BLOCKSIZE=64 attack on 0^{2^32}
+Target message: 2^32 zero bytes
+
+Allocating target message (4.0 GB)...
+Step 1: loaded from ckpt_collision.bin (~2^39.23 samples)
+Step 2: computing intermediate digests (~2 GB)...
+Step 3: linkmsg search...
+^C
+./test_attack  154284.45s user 439.95s system 1590% cpu 2:42:10.75 total
+
+
+ make BLOCKSIZE=48 USE_OMP=1
+Usage: make [test_speck|test_hash|test_attack] BLOCKSIZE=[32|48|64] [USE_OMP=1] [USE_HIP=1]
+make[1]: Entering directory '/home/snaggy/M1/MoSIG/Crypto/MoSIG_Crypto_TP/fp'
+clang -O3 -march=native -std=c11 -DBLOCKSIZE=48 -DHASHSIZE=268435456     -fopenmp -o test_speck test_speck.c utils.c -lm
+clang -O3 -march=native -std=c11 -DBLOCKSIZE=48 -DHASHSIZE=268435456     -fopenmp -o test_hash test_hash.c utils.c hash.c -lm
+clang -O3 -march=native -std=c11 -DBLOCKSIZE=48 -DHASHSIZE=268435456     -fopenmp -o test_attack test_attack.c utils.c hash.c attack.c -lm
+make[1]: Leaving directory '/home/snaggy/M1/MoSIG/Crypto/MoSIG_Crypto_TP/fp'
+➜  fp git:(main) ✗ time ./test_attack\
+> 
+➜  fp git:(main) ✗ time ./test_attack 
+===========================
+Hash size: 48 (6 bytes)
+Block length: 96 (12 bytes)
+==========================
+*** Collision
+Collision found using approx. 2^26.834656 samples:
+ms = 967787e7ef3f3699076bb184
+mf = 6af78caa681e2aa8fa83c128
+hf = 744ee38aa5ab
+*** Link message
+finished build LUT
+Link msg found using approx. 2^23.353964 samples:
+m = 31b3d19b9b8d75946f08bbec
+f(5474e2a8186e,31b3d19b9b8d75946f08bbec) = ba8a324248ae
+Intermediate digest h[1025536] = ba8a324248ae
+*** Full attack
+finished build LUT
+Attack using approx. 2^28.319985 samples:
+H(m) = d202a56ef9dd
+H(m2)= d202a56ef9dd
+m = 9efe8662854b69f7915e7eaaf25023d1f3e9c86b1f2b2c7c6c9907f98a52ef49a9ea3d112489f6f0aa934ac263b102aac664e6b722daeab9839fae3499bad175358dc5da9eabd5646ad29429d396eb700bb0bb245ce7efdac189ee94c62078d6f594c31da7cd04514ab2a60d55f8a136800424c98c4f3854 ... (16777206 more bytes) ... 7aa9e55f11431dd72123ac9367d4961b2324956cf956a91d4bf69a348590e9279839a48a603d85180872ce116ffa32869f90652046a5245bb592aeb66fa629d699af7cfe0692a64712fb0686a73611f241e5a1779b697e19ac08e6169e0689cbfa0b197d11c15859f7e865fe1cef08ecf8d32ed17b5fe567
+m2= 9efe8662854b69f7915e7eaaf25023d1f3e9c86b1f2b2c7c6c9907f98a52ef49a9ea3d112489f6f0aa934ac263b102aac664e6b722daeab9839fae3499bad175358dc5da9eabd5646ad29429d396eb700bb0bb245ce7efdac189ee94c62078d6f594c31da7cd04514ab2a60d55f8a136800424c98c4f3854 ... (16777206 more bytes) ... 54f20bc6e4cc5321d995e10454f20bc6e4cc5321d995e10454f20bc6e4cc5321d995e10454f20bc6e4cc5321d995e10454f20bc6e4cc5321d995e10454f20bc6e4cc5321d995e10454f20bc6e4cc5321d995e10454f20bc6e4cc5321d995e10454f20bc6e4cc5321d995e104d78a75e7fbcd4cde93069e1b
+./test_attack  109.37s user 3.07s system 1585% cpu 7.090 total
+

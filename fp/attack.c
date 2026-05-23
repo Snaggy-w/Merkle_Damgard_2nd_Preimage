@@ -46,11 +46,12 @@ static lut_entry *build_lut(const byte *h, size_t nb_blocks, uint32_t *mask_out)
     enum { N_STRIPES = 4096 };
     omp_lock_t locks[N_STRIPES];
     for (int s = 0; s < N_STRIPES; s++) omp_init_lock(&locks[s]);
-
+    //printf("step1 of build LUT\n");
     #pragma omp parallel for schedule(static)
     for (size_t j = 1; j < nb_blocks; j++) {
         const byte *d = h + j * HLEN;
         uint32_t slot = HASH(d) & mask;
+	//printf("step1 of build LUT iteration\n");
         for (;;) {
             int stripe = (int)(slot & (N_STRIPES - 1));
             omp_set_lock(&locks[stripe]);
@@ -63,6 +64,7 @@ static lut_entry *build_lut(const byte *h, size_t nb_blocks, uint32_t *mask_out)
             if (was_empty) break;
             slot = (slot + 1) & mask;   /* occupied — linear probe to next slot */
         }
+	//printf("step1 of build LUT finshed\n");
     }
 
     for (int s = 0; s < N_STRIPES; s++) omp_destroy_lock(&locks[s]);
@@ -541,7 +543,7 @@ double linkmsg(byte ml[BLEN], int *ind,
         *ind = -1;
         return 0.0;
     }
-
+    printf("finished build LUT\n");
     volatile atomic_int found = 0;
     byte res_ml[BLEN];
     int  res_ind = -1;
