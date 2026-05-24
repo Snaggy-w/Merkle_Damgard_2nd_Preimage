@@ -34,6 +34,7 @@
 
 #if BLOCKSIZE == 64
 #define HASHSIZE (1<<30)
+#define HASH(h) ((uint32_t)h[0] | (uint32_t)(h[1]<<8) | (uint32_t)(h[2]<<16) | (uint32_t)(h[3]<<24))
 #elif BLOCKSIZE == 48
 #define HASHSIZE (1<<28)
 #endif

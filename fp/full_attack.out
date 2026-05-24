@@ -1,17 +1,22 @@
+############## 64 bit Challenge with OpenMP (sequential attack is not feasible) #############
+
+time ./test_attack                            
 BLOCKSIZE=64 attack on 0^{2^32}
 Target message: 2^32 zero bytes
 
 Allocating target message (4.0 GB)...
-Step 1: loaded from ckpt_collision.bin (~2^39.23 samples)
+Step 1: collision search...
+  collision found using ~2^33.50 samples
+  saved ckpt_collision.bin
 Step 2: computing intermediate digests (~2 GB)...
 Step 3: linkmsg search...
 finished build LUT
-  linkmsg found using ~2^34.53 samples (i=25823622)
+  linkmsg found using ~2^37.57 samples (i=114313878)
   saved ckpt_linkmsg.bin
 
 Parameters for m2:
-  k            = 25823620  (mf repetitions)
-  suffix_zeros = 3881789344 bytes
+  k            = 114313876  (mf repetitions)
+  suffix_zeros = 2465945248 bytes
   total m2     = 4294967296 bytes (should equal 4294967296)
 
 Printing Python generator script to stdout...
@@ -26,15 +31,15 @@ Usage:
 
 m2 structure:  ms || mf^k || ml || 0^suffix_zeros
 Total size:    4294967296 bytes
-Attack used:  ~2^39.28 compression-function calls
+Attack used:  ~2^37.65 compression-function calls
 """
 import sys
 
-ms           = bytes.fromhex('1ee79068d30e411f50c13b7431b8eb94')
-mf           = bytes.fromhex('5e2db72e754e1a1e84d48225615b92d3')
-ml           = bytes.fromhex('cd16916a9af5e4b1a027989709a67a00')
-k            = 25823620
-suffix_zeros = 3881789344
+ms           = bytes.fromhex('9419fd96e51fb806a706ea4c28a78e4d')
+mf           = bytes.fromhex('404b6e0d1902f610d6472222ef12f342')
+ml           = bytes.fromhex('b89870f0bc100a628957b329edb8024b')
+k            = 114313876
+suffix_zeros = 2465945248
 
 out = sys.stdout.buffer
 
@@ -61,4 +66,127 @@ if suffix_zeros > 0:
         n = min(CHUNK, left)
         out.write(memoryview(buf)[:n])
         left -= n
-./test_attack  7625.73s user 7.62s system 1487% cpu 8:33.20 total
+./test_attack  66278.27s user 87.78s system 1580% cpu 1:09:59.46 total
+
+
+############## Attack verification #############
+
+python3 construct_attack_message2.py | ./verify_attack
+=== Second-preimage attack verification (BLOCKSIZE=64) ===
+
+Target message : 0^{2^32}  (4294967296 bytes)
+Candidate m2   : stdin
+
+Hashing zero message (2^28 compression calls)...
+H(0^{2^32}) = 41d594e6d187b37f
+Hashing m2 from stdin (reading 4294967296 bytes)...
+H(m2)       = 41d594e6d187b37f
+
+MATCH — second preimage attack successful!
+
+
+############## 48 Bit Attack #############
+
+
+time ./test_attack           
+===========================
+Hash size: 48 (6 bytes)
+Block length: 96 (12 bytes)
+==========================
+*** Collision
+Collision found using approx. 2^25.330800 samples:
+ms = 42c462f6aecba8e430b4bfef
+mf = 0bae9c91a1425cc54f6e1532
+hf = f723e672b036
+*** Link message
+Link msg found using approx. 2^28.304121 samples:
+m = b7b811bffb3b4a358e741fdd
+f(afaf61fd6e5b,b7b811bffb3b4a358e741fdd) = 4cb7d2b7ac4e
+Intermediate digest h[190105] = 4cb7d2b7ac4e
+*** Full attack
+Attack using approx. 2^26.406449 samples:
+H(m) = 3fc735217918
+H(m2)= 3fc735217918
+m = daf475304d84fd2d35876f438135e821e2a535a0f30e8a67617960f4fa51473bbf21070f68958e39c9a28f72a76e14ca721cfb1dd1532290af2a87009053efe5b15863b33b2defdcabae9cfd0ce0c7f1345d5d1d268ffedfdbbbe9ff7db02937de888c156f0e71092c1329a13214d9806ca4bf7290f3cfa2 ... (16777206 more bytes) ... 03185f057efa4fdbbbe34d3761604ead430198012f2fc25cc500a77c884c3acd6c527d036224d75d9d20375affa588d4684a236ef711adbc0182675c34bf0ff07f0ce069afd8260839ba992b9ea2d3504cc7b37d283979af8f330949f512dbdf2490f6597d5b576fa04a5f952f2b41390b7e8e82357bdf44
+m2= daf475304d84fd2d35876f438135e821e2a535a0f30e8a67617960f4fa51473bbf21070f68958e39c9a28f72a76e14ca721cfb1dd1532290af2a87009053efe5b15863b33b2defdcabae9cfd0ce0c7f1345d5d1d268ffedfdbbbe9ff7db02937de888c156f0e71092c1329a13214d9806ca4bf7290f3cfa2 ... (16777206 more bytes) ... 66d638ec0c070fb8fb6db65d66d638ec0c070fb8fb6db65d66d638ec0c070fb8fb6db65d66d638ec0c070fb8fb6db65d66d638ec0c070fb8fb6db65d66d638ec0c070fb8fb6db65d66d638ec0c070fb8fb6db65d66d638ec0c070fb8fb6db65d66d638ec0c070fb8fb6db65dfec9391329e10327985c2fe5
+./test_attack  101.95s user 0.60s system 99% cpu 1:42.59 total
+
+############## 48 Bit Attack with OpenMP #############
+
+time ./test_attack
+===========================
+Hash size: 48 (6 bytes)
+Block length: 96 (12 bytes)
+==========================
+*** Collision
+Collision found using approx. 2^25.933972 samples:
+ms = 2b5e48ea9bd26209494d9189
+mf = f7c7dab7b0497336c8e6f311
+hf = 09223d55e98f
+*** Link message
+finished build LUT
+Link msg found using approx. 2^27.243558 samples:
+m = 2fdb53d5d3aba78ae101e659
+f(1335c72e2297,2fdb53d5d3aba78ae101e659) = 805684dc44c0
+Intermediate digest h[630049] = 805684dc44c0
+*** Full attack
+finished build LUT
+Attack using approx. 2^26.687557 samples:
+H(m) = c593300298c3
+H(m2)= c593300298c3
+m = ccfd4fde1f9c4b595d05225f1d7b762ff42ff431118e109a9b6028af210c28b482fab57da441ed94bad04dcc30de3156cc8a9ad99145904e0c461be4871ac6288c060dcf25324403c14bd8f89f7a8a217eb7da4675278783a8409fcf9149444d7cb6f32cb54a9e34a0b8fa5cf154399abba8036ea912b6a2 ... (16777206 more bytes) ... 50ea211593a84aa571a4c9d787f2f0a5bee9ad05bf7ed71996e3ab430c901fc1ef2d70b7e0d52423e49dc40e4de7e2612e3b6d40222a0dc4646883580bc0cccfc380bc91d27e32e2725cc99f1cb0f6b268dd9ac9ec646b2c65bad87a8bb88c1bdb99da9185f3b3bba97576a5086e9efcf4c7a1d15d007ac0
+m2= ccfd4fde1f9c4b595d05225f1d7b762ff42ff431118e109a9b6028af210c28b482fab57da441ed94bad04dcc30de3156cc8a9ad99145904e0c461be4871ac6288c060dcf25324403c14bd8f89f7a8a217eb7da4675278783a8409fcf9149444d7cb6f32cb54a9e34a0b8fa5cf154399abba8036ea912b6a2 ... (16777206 more bytes) ... 288e78c07869dce5defb956a288e78c07869dce5defb956a288e78c07869dce5defb956a288e78c07869dce5defb956a288e78c07869dce5defb956a288e78c07869dce5defb956a288e78c07869dce5defb956a288e78c07869dce5defb956a288e78c07869dce5defb956a4aa206ff6677699617acbf80
+./test_attack  89.05s user 3.23s system 1584% cpu 5.822 total
+
+
+############## 32 Bit Attack #############
+
+time ./test_attack
+===========================
+Hash size: 32 (4 bytes)
+Block length: 64 (8 bytes)
+==========================
+*** Collision
+Collision found using approx. 2^15.866434 samples:
+ms = d42ef7fc49c9c6fe
+mf = 1291a691d50ab536
+hf = 184bc96a
+*** Link message
+Link msg found using approx. 2^18.592191 samples:
+m = a30ace8f13391773
+f(15ae15e5,a30ace8f13391773) = 8d10b602
+Intermediate digest h[4188] = 8d10b602
+*** Full attack
+Attack using approx. 2^17.805391 samples:
+H(m) = 2af828da
+H(m2)= 2af828da
+m = dac502c9634527855659e8c725cd0afd82d7e0fc75bd620da1a4267072a3f36d3e8826a22738382078b9b7a685027685d7c2f07cbb6eb8dd4ed6d42d5bf47ab37e2f10dcf98825601e66ece85bc90e6d ... (65526 more bytes) ... 164de4dcfc92c0a2dc2c67bff61b52cd0d3e013236100b8dec046325c6c3bb49e122c90dc312c91150f4aa3a4147f8df1591d35ae1b66d4415eb9c6a756aa1fd15fdd973c6c34c08ed795dddfd908358
+m2= dac502c9634527855659e8c725cd0afd82d7e0fc75bd620da1a4267072a3f36d3e8826a22738382078b9b7a685027685d7c2f07cbb6eb8dd4ed6d42d5bf47ab37e2f10dcf98825601e66ece85bc90e6d ... (65526 more bytes) ... fd659a2ff0a6cd7bfd659a2ff0a6cd7bfd659a2ff0a6cd7bfd659a2ff0a6cd7bfd659a2ff0a6cd7bfd659a2ff0a6cd7bfd659a2ff0a6cd7bfd659a2ff0a6cd7bfd659a2ff0a6cd7b0da96302e89c224b
+./test_attack  0.18s user 0.24s system 99% cpu 0.419 total
+
+############## 32 Bit Attack with OpenMP #############
+
+time ./test_attack
+===========================
+Hash size: 32 (4 bytes)
+Block length: 64 (8 bytes)
+==========================
+*** Collision
+Collision found using approx. 2^16.938132 samples:
+ms = 6701e25f490e1c53
+mf = 5d19029aa49576f7
+hf = f12b7559
+*** Link message
+finished build LUT
+Link msg found using approx. 2^19.979013 samples:
+m = d2d8b413103469b4
+f(6b343bed,d2d8b413103469b4) = 8c2b5a74
+Intermediate digest h[6328] = 8c2b5a74
+*** Full attack
+finished build LUT
+Attack using approx. 2^16.945112 samples:
+H(m) = 588e1d9f
+H(m2)= 588e1d9f
+m = da5438abfeea8fe7ae9cdd4d6ca968ab64a2d6f46880ad7bc523b31cdc76e7459b7b33653fb5bcd892e1b87d470485d89e350d944f5ad315772aad632f857e22e08f78882fb5c2ade42f2309f0f00bac ... (65526 more bytes) ... ab30709ddbd942da96e3d3b20c0418e0dfc4e7b5c0af98abf4d50d8fb23b3d0c9d2cc1441c0d7b3fc04c750e38fe7a024d2cb84e10c43810efd61636ac0ad2eab80fb1f940ecf89dbbbe96712195f7c3
+m2= da5438abfeea8fe7ae9cdd4d6ca968ab64a2d6f46880ad7bc523b31cdc76e7459b7b33653fb5bcd892e1b87d470485d89e350d944f5ad315772aad632f857e22e08f78882fb5c2ade42f2309f0f00bac ... (65526 more bytes) ... b2f2b2253a21eee4b2f2b2253a21eee4b2f2b2253a21eee4b2f2b2253a21eee4b2f2b2253a21eee4b2f2b2253a21eee4b2f2b2253a21eee4b2f2b2253a21eee4b2f2b2253a21eee40bb9ab461b5831b8
+./test_attack  1.00s user 1.15s system 1489% cpu 0.144 total

@@ -4,6 +4,23 @@
 #include "hash.h"
 #include "utils.h"
 
+
+
+#if BLOCKSIZE == 48
+
+#define IV 0x050403020100
+
+#elif BLOCKSIZE == 64
+
+#define IV 0x0706050403020100
+
+#else
+
+#define IV 0x03020100
+
+#endif
+
+
 /*
  * Compute H(0^len) without allocating a len-byte buffer.
  * Feeds len/BLEN zero blocks through compression(), then the
