@@ -1,10 +1,3 @@
-# Group identity
-
-Group members : 12315070 Ahmad Shami : 12211291 Zakaria Faihe
-Mention: M1 MoSIG
-email addresses:
-- ahmad.shami@etu.univ-grenoble.alpes.fr
-- zakaria.faihe@etu.univ-grenoble-alpes.fr
 
 # Achievement
 
